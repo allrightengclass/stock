@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>한미 증시 데일리 브리핑</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#121722; --panel2:#0f141d; --line:#1f2733;
+    --ink:#e8edf4; --dim:#8a97a8; --faint:#5a6677;
+    --up:#26d07c; --down:#ff5a6e; --flat:#c9a227; --accent:#6ea8ff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);
+    font-family:Pretendard,system-ui,sans-serif;
+    background-image:radial-gradient(900px 500px at 80% -10%,rgba(110,168,255,.08),transparent),
+                     radial-gradient(700px 400px at 0% 0%,rgba(38,208,124,.05),transparent);
+    min-height:100vh;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .mono{font-family:'IBM Plex Mono',monospace;font-feature-settings:"tnum"}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 20px 80px}
+
+  header{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:28px}
+  .eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.25em;
+    text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  h1{font-family:Fraunces,serif;font-weight:900;font-size:clamp(28px,5vw,46px);
+    line-height:1.05;letter-spacing:-.02em}
+  .updated{color:var(--faint);font-size:12px;margin-top:10px}
+
+  .headline{font-family:Fraunces,serif;font-size:clamp(20px,3.5vw,30px);font-weight:600;
+    line-height:1.3;margin:30px 0 24px;color:#fff;
+    border-left:3px solid var(--accent);padding-left:16px}
+
+  /* 오늘 요약 블록 */
+  .summary{background:linear-gradient(150deg,#141c2b,#0f1420);border:1px solid #243049;
+    border-radius:18px;padding:24px;margin:26px 0 8px;
+    box-shadow:0 8px 30px rgba(0,0,0,.25)}
+  .sum-eyebrow{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .sum-head{font-family:Fraunces,serif;font-size:clamp(20px,4vw,28px);font-weight:600;
+    color:#fff;line-height:1.25;margin-bottom:16px}
+  .sum-chips{display:flex;gap:9px;flex-wrap:wrap}
+  .chip{background:var(--panel2);border:1px solid var(--line);border-radius:11px;
+    padding:10px 13px;font-size:12px;color:var(--dim);display:flex;align-items:center;gap:7px;flex:1;min-width:96px}
+  .chip b{color:var(--ink);font-size:13.5px;font-weight:600;margin-left:auto;font-family:'IBM Plex Mono',monospace}
+  .chip .big{font-size:15px}
+
+  .grid{display:grid;gap:14px}
+  .summ{grid-template-columns:1fr 1fr}
+  @media(max-width:720px){.summ{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
+  .card h3{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
+    margin-bottom:10px;font-weight:600}
+  .card p{font-size:15px;color:#d3dae6}
+
+  .section-label{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--faint);margin:38px 0 14px;
+    display:flex;align-items:center;gap:12px}
+  .section-label::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  /* 지수 테이블 */
+  .quotes{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px}
+  .q{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px 16px;
+    transition:transform .15s,border-color .15s}
+  .q:hover{transform:translateY(-2px);border-color:#2c3a4d}
+  .q .nm{font-size:12px;color:var(--dim);margin-bottom:6px}
+  .q .px{font-family:'IBM Plex Mono',monospace;font-size:19px;font-weight:600}
+  .q .ch{font-family:'IBM Plex Mono',monospace;font-size:13px;margin-top:4px;font-weight:500}
+  .q .sub{font-size:11px;color:var(--faint);margin-top:8px}
+  .up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--flat)}
+
+  .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:20px 22px;margin-top:6px}
+  canvas{max-height:300px}
+
+  /* 시나리오 */
+  .scen{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  @media(max-width:720px){.scen{grid-template-columns:1fr}}
+  .sc{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;
+    position:relative;overflow:hidden}
+  .sc .bar{position:absolute;left:0;top:0;height:3px}
+  .sc:nth-child(1) .bar{background:var(--up)}
+  .sc:nth-child(2) .bar{background:var(--flat)}
+  .sc:nth-child(3) .bar{background:var(--down)}
+  .sc .t{font-weight:600;font-size:14px;margin-bottom:4px}
+  .sc .pr{font-family:'IBM Plex Mono',monospace;font-size:28px;font-weight:600;margin-bottom:8px}
+  .sc .d{font-size:13px;color:var(--dim)}
+
+  ul.issues{list-style:none;display:grid;gap:10px}
+  ul.issues li{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:13px 16px;font-size:14px;color:#d3dae6;display:flex;gap:12px}
+  ul.issues li::before{content:"▸";color:var(--accent);font-weight:700}
+
+  .vol{background:linear-gradient(135deg,var(--panel),#10171f);
+    border:1px solid var(--line);border-radius:14px;padding:22px;margin-top:6px}
+  .vol .lab{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+  .vol p{font-size:15px;color:#dde4ee}
+
+  /* 특징주 진단 */
+  .pick{position:relative}
+  .pick-n{font-family:Fraunces,serif;font-size:19px;font-weight:600;color:#fff}
+  .badges{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 12px}
+  .badge{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.03em;
+    background:rgba(110,168,255,.12);color:var(--accent);border:1px solid rgba(110,168,255,.25);
+    padding:3px 9px;border-radius:999px}
+  .pick p{font-size:13.5px;color:#cdd5e1}
+  .caution{margin-top:10px;font-size:12.5px;color:#ffb4be;
+    background:rgba(255,90,110,.08);border:1px solid rgba(255,90,110,.2);
+    border-radius:8px;padding:8px 11px}
+
+  /* 차수재시실 5축 채점 */
+  .pick-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .grade{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:.03em;
+    padding:4px 11px;border-radius:999px;white-space:nowrap}
+  .g-buy{background:rgba(38,208,124,.15);color:var(--up);border:1px solid rgba(38,208,124,.3)}
+  .g-watch{background:rgba(201,162,39,.15);color:#e7c14e;border:1px solid rgba(201,162,39,.35)}
+  .g-hold{background:rgba(138,151,168,.12);color:var(--dim);border:1px solid var(--line)}
+  .axes{display:flex;gap:7px;margin:12px 0;flex-wrap:wrap}
+  .axis{display:flex;flex-direction:column;align-items:center;gap:3px;
+    background:var(--panel2);border:1px solid var(--line);border-radius:9px;
+    padding:7px 0;min-width:46px;flex:1}
+  .axis .ax-k{font-size:11px;color:var(--dim);font-weight:600}
+  .axis .ax-v{font-size:14px;line-height:1}
+  .gate{background:linear-gradient(135deg,var(--panel),#1a1410);
+    border:1px solid rgba(201,162,39,.25);border-radius:14px;padding:20px;margin-top:14px}
+  .gate .lab{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:#e7c14e;margin-bottom:8px}
+  .gate p{font-size:14.5px;color:#e8e0cf}
+
+  /* 관찰 트리거 */
+  .trig{display:grid;gap:8px}
+  .trig-row{display:flex;align-items:flex-start;gap:11px;background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .trig-ic{font-size:15px;line-height:1.4;flex-shrink:0}
+  .trig-body{flex:1}
+  .trig-cond{font-size:13.5px;color:#dde4ee;font-weight:500}
+  .trig-note{font-size:12px;color:var(--faint);margin-top:3px;font-family:'IBM Plex Mono',monospace}
+  .trig-all{margin-top:10px;font-size:12.5px;text-align:center;color:var(--up);
+    background:rgba(38,208,124,.08);border:1px solid rgba(38,208,124,.2);border-radius:8px;padding:9px}
+
+  /* 리스크·역발상 카드 */
+  .risk{border-radius:14px;padding:18px 20px}
+  .risk .rt{font-size:14px;font-weight:600;margin-bottom:7px;display:flex;align-items:center;gap:7px}
+  .risk p{font-size:13.5px;line-height:1.55}
+  .r-warning{background:rgba(255,90,110,.07);border:1px solid rgba(255,90,110,.22)}
+  .r-warning .rt{color:#ff8a96} .r-warning p{color:#f0d4d7}
+  .r-contrarian{background:rgba(201,162,39,.07);border:1px solid rgba(201,162,39,.25)}
+  .r-contrarian .rt{color:#e7c14e} .r-contrarian p{color:#ece3cf}
+  .r-opportunity{background:rgba(38,208,124,.07);border:1px solid rgba(38,208,124,.22)}
+  .r-opportunity .rt{color:#4fe0a0} .r-opportunity p{color:#cfeede}
+
+  /* 신호등 */
+  .signal{font-size:13px}
+  /* 5축 게이지 */
+  .gauges{display:flex;gap:8px;margin:12px 0}
+  .gauge{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px}
+  .gauge-track{width:100%;height:46px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:7px;position:relative;overflow:hidden;display:flex;align-items:flex-end}
+  .gauge-fill{width:100%;border-radius:0 0 6px 6px;transition:height .4s}
+  .gauge-k{font-size:11px;color:var(--dim);font-weight:600}
+  /* 진입가 점검 */
+  .checker{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
+  .checker .row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+  .checker label{display:block;font-size:11px;color:var(--dim);margin-bottom:5px}
+  .checker input,.checker select{width:100%;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;padding:10px 12px;color:var(--ink);font-family:'IBM Plex Mono',monospace;
+    font-size:14px;outline:none}
+  .checker input:focus,.checker select:focus{border-color:var(--accent)}
+  .chk-btn{width:100%;background:var(--accent);color:#0b0e14;font-weight:600;border:none;
+    border-radius:9px;padding:12px;font-size:14px;font-family:Pretendard;cursor:pointer;margin-top:4px}
+  .chk-out{margin-top:16px;display:none;gap:10px;grid-template-columns:1fr 1fr}
+  .chk-cell{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+  .chk-cell .ck{font-size:11px;color:var(--dim);margin-bottom:5px}
+  .chk-cell .cv{font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600}
+  .chk-note{grid-column:1/-1;font-size:12.5px;color:var(--faint);line-height:1.5;
+    border-top:1px solid var(--line);padding-top:11px;margin-top:3px}
+
+  .disc{margin-top:46px;padding:16px;border:1px dashed var(--line);border-radius:10px;
+    font-size:12px;color:var(--faint);text-align:center}
+  .err{color:var(--down);font-size:13px}
+  [data-fade]{opacity:0;transform:translateY(10px);animation:fade .6s forwards}
+  @keyframes fade{to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header data-fade>
+    <div class="eyebrow">Daily Market Briefing · KR × US</div>
+    <h1>한미 증시 데일리 브리핑</h1>
+    <div class="updated mono" id="updated">— 불러오는 중 —</div>
+  </header>
+
+  <div id="content"></div>
+
+  <div class="disc" id="disc"></div>
+</div>
+
+<script>
+const fmtNum = n => (typeof n==="number") ? n.toLocaleString("en-US",{maximumFractionDigits:2}) : "—";
+const cls = v => v>0?"up":v<0?"down":"flat";
+const sign = v => v>0?"▲ +":v<0?"▼ ":"";
+
+async function load(){
+  let data;
+  try{
+    const r = await fetch("data.json?t="+Date.now());
+    data = await r.json();
+  }catch(e){
+    document.getElementById("content").innerHTML =
+      `<p class="err">data.json을 불러올 수 없습니다. 워크플로가 한 번 이상 실행되어야 합니다.</p>`;
+    return;
+  }
+  document.getElementById("updated").textContent = "최종 갱신 · " + (data.updated_at||"—");
+  document.getElementById("disc").textContent = data.disclaimer||"";
+
+  const b = data.brief||{};
+  const m = data.metrics||{};
+  let h = "";
+
+  // 차수재시실 채점 카드 헬퍼 (특징주·보유 공용)
+  const gradeClass = g => /비중확대|코어유지/.test(g)?"g-buy":/관심|단기/.test(g)?"g-watch":"g-hold";
+  const signal = g => /비중확대|코어유지/.test(g)?"🟢":/관심|단기/.test(g)?"🟡":"🔴";
+  const sym2pt = s => s==="✅"?2:s==="⚠️"?1:0;
+  const fillColor = s => s==="✅"?"#26d07c":s==="⚠️"?"#c9a227":"#3a4250";
+  const renderScoreCard = p => {
+    const sc=p.scores||{};
+    const gauges=["차","수","재","시","실"].map(k=>{
+      const v=sc[k]||"❓"; const pct=(sym2pt(v)/2*100);
+      return `<div class="gauge"><div class="gauge-track">
+        <div class="gauge-fill" style="height:${pct}%;background:${fillColor(v)}"></div></div>
+        <span class="gauge-k">${k}</span></div>`;
+    }).join("");
+    return `<div class="card pick" data-fade>
+      <div class="pick-top"><span class="pick-n"><span class="signal">${signal(p.grade||"")}</span> ${p.name}</span>
+        <span class="grade ${gradeClass(p.grade||"")}">${p.grade||""}</span></div>
+      <div class="gauges">${gauges}</div>
+      <p>${p.comment||""}</p>
+      ${p.caution?`<div class="caution">⚠ ${p.caution}</div>`:""}
+    </div>`;
+  };
+
+  if(b.headline){
+    // 시황 신호등 (게이트 텍스트 기반)
+    const gate=b.market_gate||"";
+    const mSig = /❌|제한|과열|데이존|부적합/.test(gate)?"🔴 제한":/⚠️|주의|혼조/.test(gate)?"🟡 주의":"🟢 양호";
+    // 변동성 등급 추출
+    const vo=b.volatility_outlook||"";
+    const vol = /높/.test(vo)?(/보통|다소/.test(vo)?"보통~높음":"높음"):/낮/.test(vo)?"낮음":"보통";
+    // 특징주 1위
+    let topChip="";
+    if(b.stock_scores&&b.stock_scores.length){
+      const t=b.stock_scores[0];
+      const s=/비중확대/.test(t.grade||"")?"🟢":/관심|단기/.test(t.grade||"")?"🟡":"🔴";
+      topChip=`<div class="chip">🥇 ${t.name} <b><span class="big">${s}</span></b></div>`;
+    }
+    h += `<div class="summary" data-fade>
+      <div class="sum-eyebrow">Today · 핵심 요약</div>
+      <div class="sum-head">${b.headline}</div>
+      <div class="sum-chips">
+        <div class="chip">🚦 시황 <b>${mSig}</b></div>
+        <div class="chip">⚡ 변동성 <b>${vol}</b></div>
+        ${topChip}
+      </div>
+    </div>`;
+  }
+
+  // 진입가 점검 (정수님 입력값 검증 도구 — 상단 배치)
+  h += `<div class="section-label">진입가 점검</div>
+  <div class="checker" data-fade>
+    <div class="row">
+      <div><label>종목명</label><input id="ck-name" placeholder="예: 삼성전자"></div>
+      <div><label>현재가</label><input id="ck-now" type="number" inputmode="decimal" placeholder="300000"></div>
+    </div>
+    <div class="row">
+      <div><label>진입 목표가</label><input id="ck-buy" type="number" inputmode="decimal" placeholder="295000"></div>
+      <div><label>목표가 (선택)</label><input id="ck-target" type="number" inputmode="decimal" placeholder="350000"></div>
+    </div>
+    <button class="chk-btn" onclick="runChecker()">점검하기</button>
+    <div class="chk-out" id="ck-out"></div>
+  </div>`;
+
+  // 내 보유 종목 (차수재시실 채점)
+  if(b.holdings_scores?.length){
+    h += `<div class="section-label">내 보유 종목 · 차수재시실</div><div class="grid" style="gap:12px">`;
+    b.holdings_scores.forEach(p=>{ h+=renderScoreCard(p); });
+    h += `</div>`;
+  }
+
+  // 요약
+  h += `<div class="grid summ">
+    <div class="card" data-fade><h3>🇺🇸 미국 증시</h3><p>${b.us_summary||"—"}</p></div>
+    <div class="card" data-fade><h3>🇰🇷 한국 증시</h3><p>${b.kr_summary||"—"}</p></div>
+  </div>`;
+
+  // 변동성
+  if(b.volatility_outlook){
+    h += `<div class="vol" data-fade><div class="lab">⚡ 오늘의 변동성 예측</div><p>${b.volatility_outlook}</p></div>`;
+  }
+
+  // 여론/심리
+  if(b.sentiment){
+    h += `<div class="vol" data-fade style="margin-top:14px;background:linear-gradient(135deg,var(--panel),#171019)"><div class="lab">🗣 뉴스·여론 심리</div><p>${b.sentiment}</p></div>`;
+  }
+
+  // 카드 렌더 헬퍼
+  const renderQuotes = items => {
+    let s = `<div class="quotes">`;
+    items.forEach(d=>{
+      if(d.error){ s+=`<div class="q"><div class="nm">${d.name}</div><div class="err" style="font-size:12px">데이터 없음</div></div>`; return; }
+      s += `<div class="q" data-fade>
+        <div class="nm">${d.name}</div>
+        <div class="px">${fmtNum(d.last)}</div>
+        <div class="ch ${cls(d.chg_pct)}">${sign(d.chg_pct)}${Math.abs(d.chg_pct)}%</div>
+        <div class="sub">변동성 ${d.vol_annual}% · RSI ${d.rsi??"—"} · ${d.trend||""}</div>
+      </div>`;
+    });
+    return s + `</div>`;
+  };
+
+  const all = Object.values(m);
+  const idx = all.filter(d=>(d.group||"지표")==="지표");
+  const etf = all.filter(d=>d.group==="ETF");
+
+  // 지표 카드
+  h += `<div class="section-label">실시간 지표</div>` + renderQuotes(idx);
+
+  // 차트 (지표 기준)
+  h += `<div class="section-label">등락률 비교</div><div class="chartbox" data-fade><canvas id="chg"></canvas></div>`;
+
+  // ETF 카드
+  if(etf.length) h += `<div class="section-label">ETF</div>` + renderQuotes(etf);
+
+  // 이슈
+  if(b.key_issues?.length){
+    h += `<div class="section-label">주요 이슈</div><ul class="issues" data-fade>`;
+    b.key_issues.forEach(i=>h+=`<li>${i}</li>`);
+    h += `</ul>`;
+  }
+
+  // 시나리오
+  if(b.scenarios?.length){
+    h += `<div class="section-label">변동성 시나리오</div><div class="scen">`;
+    b.scenarios.forEach(s=>{
+      h+=`<div class="sc" data-fade><span class="bar"></span>
+        <div class="t">${s.name}</div><div class="pr">${s.prob||""}</div>
+        <div class="d">${s.desc||""}</div></div>`;
+    });
+    h += `</div>`;
+  }
+
+  // 리스크·역발상
+  if(b.risk_cards?.length){
+    const ic={warning:"⚠️",contrarian:"🔄",opportunity:"🌱"};
+    h += `<div class="section-label">리스크 · 역발상</div><div class="grid" style="gap:12px">`;
+    b.risk_cards.forEach(r=>{
+      const ty=r.type||"warning";
+      h+=`<div class="risk r-${ty}" data-fade>
+        <div class="rt">${ic[ty]||"⚠️"} ${r.title||""}</div>
+        <p>${r.body||""}</p></div>`;
+    });
+    h += `</div>`;
+  }
+
+  // 시황 게이트 (특징주 채점 직전 — 시장이 종목을 이긴다)
+  if(b.market_gate){
+    h += `<div class="gate" data-fade><div class="lab">🚦 시황 게이트 (시)</div><p>${b.market_gate}</p></div>`;
+  }
+
+  // 특징주 차수재시실 채점
+  if(b.stock_scores?.length){
+    const fdate = (data.featured&&data.featured.date)||"";
+    h += `<div class="section-label">특징주 · 차수재시실 채점${fdate?` (${fdate})`:""}</div><div class="grid" style="gap:12px">`;
+    b.stock_scores.forEach(p=>{ h+=renderScoreCard(p); });
+    h+=`</div>`;
+    if(b.stock_scores.length>=2){
+      h+=`<div class="section-label">차수재시실 레이더</div><div class="chartbox" data-fade><canvas id="radar"></canvas></div>`;
+    }
+  } else if(data.featured && data.featured.error){
+    h += `<div class="section-label">특징주</div><div class="card" data-fade><p class="err" style="font-size:13px">KRX 데이터 일시 불가 — 뉴스 기반 분석으로 대체되었습니다.</p></div>`;
+  }
+
+  // 워치리스트
+  if(b.watchlist?.length){
+    h += `<div class="section-label">주목 종목·섹터</div><ul class="issues" data-fade>`;
+    b.watchlist.forEach(i=>h+=`<li>${i}</li>`);
+    h += `</ul>`;
+  }
+
+  // 관찰 트리거
+  if(b.triggers?.length){
+    const tic = s => /✅/.test(s)?"✅":/⚠️/.test(s)?"⚠️":/❌/.test(s)?"❌":"❓";
+    const allMet = b.triggers.every(t=>/✅/.test(t.status||""));
+    h += `<div class="section-label">관찰 트리거 · 전환 확인</div><div class="trig">`;
+    b.triggers.forEach(t=>{
+      h+=`<div class="trig-row" data-fade>
+        <span class="trig-ic">${tic(t.status||"❓")}</span>
+        <div class="trig-body"><div class="trig-cond">${t.cond||""}</div>
+        ${t.note?`<div class="trig-note">${t.note}</div>`:""}</div>
+      </div>`;
+    });
+    h+=`</div>`;
+    if(allMet) h+=`<div class="trig-all">✅ 모든 트리거 충족 — 전환 초입 신호</div>`;
+  }
+
+  // 뉴스 헤드라인
+  const nw = data.news||{};
+  if(Object.keys(nw).length){
+    h += `<div class="section-label">최신 뉴스</div><div class="grid" style="gap:18px">`;
+    for(const cat in nw){
+      h += `<div class="card" data-fade><h3>📰 ${cat}</h3><ul style="list-style:none;display:grid;gap:8px;margin-top:4px">`;
+      nw[cat].forEach(n=>{
+        h += `<li style="font-size:13.5px;color:#c8d0dc;line-height:1.5">${n.title}</li>`;
+      });
+      h += `</ul></div>`;
+    }
+    h += `</div>`;
+  }
+
+  document.getElementById("content").innerHTML = h;
+
+  // 페이드 스태거
+  document.querySelectorAll("[data-fade]").forEach((el,i)=>el.style.animationDelay=(i*40)+"ms");
+
+  // 차트 렌더 (지표 그룹)
+  const labels=[], vals=[], colors=[];
+  idx.forEach(d=>{ if(d.error)return;
+    labels.push(d.name); vals.push(d.chg_pct);
+    colors.push(d.chg_pct>0?"#26d07c":d.chg_pct<0?"#ff5a6e":"#c9a227"); });
+  new Chart(document.getElementById("chg"),{
+    type:"bar",
+    data:{labels,datasets:[{data:vals,backgroundColor:colors,borderRadius:6}]},
+    options:{plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{color:"#8a97a8",font:{family:"'IBM Plex Mono'",size:10}},grid:{display:false}},
+        y:{ticks:{color:"#8a97a8",callback:v=>v+"%",font:{family:"'IBM Plex Mono'"}},
+           grid:{color:"#1f2733"}}}}
+  });
+
+  // 차수재시실 레이더
+  if(b.stock_scores && b.stock_scores.length>=2 && document.getElementById("radar")){
+    const axes=["차","수","재","시","실"];
+    const palette=[
+      {b:"#6ea8ff",f:"rgba(110,168,255,.18)"},
+      {b:"#ff5a9e",f:"rgba(255,90,158,.16)"},
+      {b:"#26d07c",f:"rgba(38,208,124,.14)"}
+    ];
+    const ds=b.stock_scores.slice(0,3).map((p,i)=>({
+      label:p.name,
+      data:axes.map(k=>sym2pt((p.scores||{})[k]||"❓")),
+      borderColor:palette[i].b, backgroundColor:palette[i].f,
+      pointBackgroundColor:palette[i].b, borderWidth:2
+    }));
+    new Chart(document.getElementById("radar"),{
+      type:"radar",
+      data:{labels:axes.map(k=>k+"("+({차:"차트",수:"수급",재:"재료",시:"시황",실:"실적"}[k])+")"),datasets:ds},
+      options:{
+        plugins:{legend:{labels:{color:"#cdd5e1",font:{family:"Pretendard",size:12}}}},
+        scales:{r:{
+          min:0,max:2,ticks:{stepSize:1,color:"#5a6677",backdropColor:"transparent",font:{family:"'IBM Plex Mono'",size:9}},
+          grid:{color:"#1f2733"},angleLines:{color:"#1f2733"},
+          pointLabels:{color:"#8a97a8",font:{family:"Pretendard",size:11}}
+        }}
+      }
+    });
+  }
+}
+load();
+
+// 진입가 점검 계산기 (입력값 기반 — 매매 추천이 아닌 리스크 점검 도구)
+function runChecker(){
+  const name=document.getElementById("ck-name").value||"종목";
+  const now=parseFloat(document.getElementById("ck-now").value);
+  const buy=parseFloat(document.getElementById("ck-buy").value);
+  const target=parseFloat(document.getElementById("ck-target").value);
+  const out=document.getElementById("ck-out");
+  if(!now||!buy){ out.style.display="grid";
+    out.innerHTML=`<div class="chk-note" style="border:none">현재가와 진입 목표가를 입력해주세요.</div>`; return; }
+
+  const pos=((buy-now)/now*100);
+  const posTxt=(pos>=0?"+":"")+pos.toFixed(1)+"%";
+  const stop10=Math.round(buy*0.90), stop15=Math.round(buy*0.85);
+  let cells=`
+    <div class="chk-cell"><div class="ck">현재가 대비 진입가</div><div class="cv ${pos<0?'up':'down'}">${posTxt}</div></div>
+    <div class="chk-cell"><div class="ck">손절 기준 예시 (−10%/−15%)</div><div class="cv">${stop10.toLocaleString()} / ${stop15.toLocaleString()}</div></div>`;
+  if(target){
+    const up=((target-buy)/buy*100);
+    const reward=target-buy, risk=buy-stop10;
+    const rr=risk>0?(reward/risk).toFixed(2):"—";
+    cells+=`
+    <div class="chk-cell"><div class="ck">목표가까지 상승여력</div><div class="cv up">+${up.toFixed(1)}%</div></div>
+    <div class="chk-cell"><div class="ck">손익비 (목표÷−10%손절)</div><div class="cv">${rr} : 1</div></div>`;
+  }
+  cells+=`<div class="chk-note">${name} 기준. 진입가가 현재가보다 ${pos<0?'아래':'위'}라 ${pos<0?'조정 대기':'추격 진입'} 성격입니다. 손절가는 일반적 리스크관리 예시이며 매매 권유가 아닙니다 — 본인 원칙으로 조정하세요. 손익비는 보통 2:1 이상을 선호합니다.</div>`;
+  out.style.display="grid"; out.innerHTML=cells;
+}
+window.runChecker=runChecker;
+</script>
+</body>
+</html>
