@@ -235,7 +235,7 @@ def run_llm(data: dict, news: dict, featured: dict, holdings: dict) -> dict:
 
     import google.generativeai as genai
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")  # 무료 티어
+    model = genai.GenerativeModel("gemini-2.5-flash")  # 무료 티어
     prompt = ANALYSIS_PROMPT.format(
         data=json.dumps(data, ensure_ascii=False),
         news=json.dumps(news, ensure_ascii=False),
