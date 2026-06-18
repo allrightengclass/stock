@@ -173,6 +173,8 @@
   .gauge-track{width:100%;height:46px;background:var(--panel2);border:1px solid var(--line);
     border-radius:7px;position:relative;overflow:hidden;display:flex;align-items:flex-end}
   .gauge-fill{width:100%;border-radius:0 0 6px 6px;transition:height .4s}
+  .gauge-track.g-unknown{border-style:dashed;border-color:#3a4250}
+  .gauge-sym{position:absolute;top:4px;left:0;right:0;text-align:center;font-size:12px;line-height:1;z-index:2}
   .gauge-k{font-size:11px;color:var(--dim);font-weight:600}
   /* 진입가 점검 */
   .checker{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
@@ -241,10 +243,17 @@ async function load(){
   const renderScoreCard = p => {
     const sc=p.scores||{};
     const kname={차:"차트",수:"수급",재:"재료",시:"시황",실:"실적"};
+    const gmeta={
+      "✅":{h:100,c:"#26d07c"},
+      "⚠️":{h:50, c:"#c9a227"},
+      "❌":{h:10, c:"#ff5a6e"},
+      "❓":{h:0,  c:"transparent"}
+    };
     const gauges=["차","수","재","시","실"].map(k=>{
-      const v=sc[k]||"❓"; const pct=(sym2pt(v)/2*100);
-      return `<div class="gauge"><div class="gauge-track">
-        <div class="gauge-fill" style="height:${pct}%;background:${fillColor(v)}"></div></div>
+      const v=sc[k]||"❓"; const mt=gmeta[v]||gmeta["❓"];
+      return `<div class="gauge"><div class="gauge-track${v==="❓"?" g-unknown":""}">
+        <span class="gauge-sym">${v}</span>
+        <div class="gauge-fill" style="height:${mt.h}%;background:${mt.c}"></div></div>
         <span class="gauge-k">${kname[k]}</span></div>`;
     }).join("");
     return `<div class="card pick" data-fade>
@@ -256,7 +265,7 @@ async function load(){
     </div>`;
   };
   // 차수재시실 범례
-  const scoreLegend = `<div class="legend">📊 5축 채점 — <b>차트·수급·재료·시황·실적</b>이 각각 얼마나 충족됐는지 막대 높이로 표시 · 등급 🟢우량/유지 🟡단기 🔴관망</div>`;
+  const scoreLegend = `<div class="legend">📊 5축 채점 — <b>차트·수급·재료·시황·실적</b>이 각각 얼마나 충족됐는지 막대로 표시 (✅충족 ⚠️부분 ❌미충족 ❓미확인) · 등급 🟢우량/유지 🟡단기 🔴관망</div>`;
 
   // 카드 렌더 헬퍼 + 지표 분류
   const renderQuotes = items => {
