@@ -2,19 +2,20 @@
 # -*- coding: utf-8 -*-
 """
 한미 증시 데일리 브리핑 자동 생성기
-- yfinance로 한국/미국 지수·섹터·VIX·환율 수집
-- 등락률, 변동성(ATR/표준편차), 이동평균, RSI 계산
-- Gemini로 흐름·이슈 분석 및 변동성 시나리오 생성
-- docs/data.json 저장 + (선택) 텔레그램 알림
+- yfinance로 한국/미국 지수·섹터·VIX·환율·금 수집
+- 등락률, 변동성, 이동평균, RSI 계산
+- Gemini로 흐름·여론·변동성·차수재시실 채점 생성
+- docs/data.json 저장 + (선택) 알림
 
 환경변수:
   GEMINI_API_KEY   (필수) Google AI Studio 무료 키
-  TELEGRAM_TOKEN   (선택) 봇 토큰
-  TELEGRAM_CHAT_ID (선택) 채팅 ID
+  TELEGRAM_TOKEN / TELEGRAM_CHAT_ID  (선택)
+  SMTP_USER / SMTP_PASS / EMAIL_TO   (선택)
 """
 
 import os
 import json
+import time
 import datetime
 import math
 import urllib.parse
@@ -28,25 +29,21 @@ import screener
 
 # ── 추적 대상 ──────────────────────────────────────────────
 TICKERS = {
-    # 한국
     "KOSPI":        "^KS11",
     "KOSDAQ":       "^KQ11",
     "삼성전자":      "005930.KS",
     "SK하이닉스":    "000660.KS",
-    # 미국
     "S&P500":       "^GSPC",
     "나스닥":        "^IXIC",
     "다우":          "^DJI",
     "반도체(SOXX)":  "SOXX",
     "엔비디아":      "NVDA",
-    # 위험·환율·원자재
     "VIX(공포지수)": "^VIX",
     "원/달러":       "KRW=X",
     "달러인덱스":    "DX-Y.NYB",
     "금(선물)":      "GC=F",
 }
 
-# ETF (별도 섹션으로 표시)
 ETF_TICKERS = {
     "KODEX200":           "069500.KS",
     "TIGER미국S&P500":    "360750.KS",
@@ -58,11 +55,9 @@ ETF_TICKERS = {
 
 # 내 보유 종목 (코어 — 자유롭게 추가/제거)
 HOLDINGS = {
-    # 국내
     "삼성전자":      "005930.KS",
     "현대모비스":    "012330.KS",
     "LG이노텍":      "011070.KS",
-    # 해외 코어
     "애플":          "AAPL",
     "엔비디아":      "NVDA",
     "알파벳":        "GOOGL",
@@ -71,61 +66,80 @@ HOLDINGS = {
     "마이크로소프트": "MSFT",
 }
 
-# 뉴스 검색어 (Google News RSS, 무료·키 불필요)
 NEWS_QUERIES = {
     "한국증시": "코스피 OR 코스닥 증시",
     "미국증시": "미국 증시 OR S&P500 OR 나스닥",
     "반도체":   "반도체 OR 엔비디아 OR SK하이닉스",
 }
 
+GEMINI_MODEL = "gemini-2.5-flash"   # 현역 무료 모델 (필요시 gemini-2.5-flash-lite)
+
 OUT_PATH = os.path.join(os.path.dirname(__file__), "docs", "data.json")
 
 
+# ── 안전 변환 (NaN/inf → None) ─────────────────────────────
+def _safe(v, ndigits=2):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if f != f or f in (float("inf"), float("-inf")):   # NaN/inf 차단
+        return None
+    return round(f, ndigits)
+
+
+def _clean(o):
+    """저장 직전 모든 NaN/inf를 None으로 정리 (JSON 호환 보장)."""
+    if isinstance(o, dict):
+        return {k: _clean(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_clean(x) for x in o]
+    if isinstance(o, float) and (o != o or o in (float("inf"), float("-inf"))):
+        return None
+    return o
+
+
 # ── 지표 계산 ──────────────────────────────────────────────
-def rsi(series: pd.Series, period: int = 14) -> float:
+def rsi(series: pd.Series, period: int = 14):
     delta = series.diff()
     gain = delta.clip(lower=0).rolling(period).mean()
     loss = -delta.clip(upper=0).rolling(period).mean()
     rs = gain / loss.replace(0, float("nan"))
-    val = 100 - (100 / (1 + rs))
-    last = val.dropna()
-    return round(float(last.iloc[-1]), 1) if len(last) else None
+    val = (100 - (100 / (1 + rs))).dropna()
+    return _safe(val.iloc[-1], 1) if len(val) else None
 
 
 def analyze_ticker(name: str, symbol: str, group: str = "지표") -> dict:
     try:
         df = yf.Ticker(symbol).history(period="3mo", interval="1d")
-        if df.empty or len(df) < 5:
+        close = df["Close"].dropna() if not df.empty else pd.Series(dtype=float)
+        if len(close) < 5:
             return {"name": name, "symbol": symbol, "group": group, "error": "no data"}
 
-        close = df["Close"]
         last = float(close.iloc[-1])
         prev = float(close.iloc[-2])
-        chg_pct = round((last - prev) / prev * 100, 2)
+        chg_pct = _safe((last - prev) / prev * 100) if prev else None
 
-        # 일간 수익률 표준편차(연율화) → 변동성 지표
         rets = close.pct_change().dropna()
-        vol_daily = float(rets.tail(20).std())
-        vol_annual = round(vol_daily * math.sqrt(252) * 100, 1)
+        vol_annual = _safe(float(rets.tail(20).std()) * math.sqrt(252) * 100, 1) if len(rets) else None
 
         ma20 = float(close.tail(20).mean())
         ma60 = float(close.tail(60).mean()) if len(close) >= 60 else None
         trend = "상승" if (ma60 and ma20 > ma60) else "하락/횡보"
 
-        # 최근 20일 변동폭
         recent = close.tail(20)
-        range_pct = round((recent.max() - recent.min()) / recent.min() * 100, 1)
+        range_pct = _safe((recent.max() - recent.min()) / recent.min() * 100, 1) if recent.min() else None
 
         return {
             "name": name,
             "symbol": symbol,
             "group": group,
-            "last": round(last, 2),
+            "last": _safe(last),
             "chg_pct": chg_pct,
-            "vol_annual": vol_annual,   # 연율화 변동성(%)
-            "range20_pct": range_pct,   # 20일 변동폭(%)
+            "vol_annual": vol_annual,
+            "range20_pct": range_pct,
             "rsi": rsi(close),
-            "ma20": round(ma20, 2),
+            "ma20": _safe(ma20),
             "trend": trend,
         }
     except Exception as e:
@@ -134,21 +148,17 @@ def analyze_ticker(name: str, symbol: str, group: str = "지표") -> dict:
 
 # ── 여론(뉴스) 수집 ────────────────────────────────────────
 def fetch_news(per_query: int = 4) -> dict:
-    """Google News RSS로 한미 증시 헤드라인 수집 (무료, 키 불필요)."""
     out = {}
     for label, q in NEWS_QUERIES.items():
         try:
             url = ("https://news.google.com/rss/search?q="
-                   + urllib.parse.quote(q)
-                   + "&hl=ko&gl=KR&ceid=KR:ko")
+                   + urllib.parse.quote(q) + "&hl=ko&gl=KR&ceid=KR:ko")
             xml = requests.get(url, timeout=15,
                                headers={"User-Agent": "Mozilla/5.0"}).text
             root = ET.fromstring(xml)
-            items = root.findall(".//item")[:per_query]
             heads = []
-            for it in items:
+            for it in root.findall(".//item")[:per_query]:
                 title = it.findtext("title", "").strip()
-                # "기사제목 - 언론사" 형태에서 매체명 분리
                 src = title.rsplit(" - ", 1)[-1] if " - " in title else ""
                 heads.append({"title": title, "source": src})
             out[label] = heads
@@ -235,29 +245,36 @@ def run_llm(data: dict, news: dict, featured: dict, holdings: dict) -> dict:
 
     import google.generativeai as genai
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")  # 무료 티어
+    model = genai.GenerativeModel(GEMINI_MODEL)
     prompt = ANALYSIS_PROMPT.format(
         data=json.dumps(data, ensure_ascii=False),
         news=json.dumps(news, ensure_ascii=False),
         featured=json.dumps(featured, ensure_ascii=False),
         holdings=json.dumps(holdings, ensure_ascii=False))
-    resp = model.generate_content(prompt)
-    text = resp.text.strip()
-    # 코드펜스 제거
-    if text.startswith("```"):
-        text = text.split("```")[1].lstrip("json").strip()
-    try:
-        return json.loads(text)
-    except Exception:
-        return {"headline": "분석 파싱 실패", "raw": text}
 
-    # ── Claude API로 바꾸려면 위를 주석 처리하고 아래 사용 ──
-    # import anthropic
-    # client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    # msg = client.messages.create(
-    #     model="claude-haiku-4-5-20251001", max_tokens=1500,
-    #     messages=[{"role": "user", "content": prompt}])
-    # return json.loads(msg.content[0].text)
+    # 한도(429) 등 일시 오류 시 자동 재시도
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = model.generate_content(prompt)
+            text = resp.text.strip()
+            if text.startswith("```"):
+                text = text.split("```")[1].lstrip("json").strip()
+            return json.loads(text)
+        except Exception as e:
+            last_err = e
+            msg = str(e)
+            if "429" in msg or "quota" in msg.lower() or "rate" in msg.lower():
+                wait = 40 * (attempt + 1)
+                print(f"rate limit, {wait}s 대기 후 재시도...")
+                time.sleep(wait)
+                continue
+            # JSON 파싱 실패 등은 1회만 재시도
+            if attempt == 0:
+                time.sleep(5)
+                continue
+            break
+    return {"headline": "분석 일시 실패", "error": str(last_err)}
 
 
 # ── 알림 ───────────────────────────────────────────────────
@@ -266,45 +283,34 @@ def notify_telegram(brief: dict):
     chat = os.environ.get("TELEGRAM_CHAT_ID")
     if not (token and chat):
         return
-    msg = (
-        f"📊 {brief.get('headline','')}\n\n"
-        f"🇺🇸 {brief.get('us_summary','')}\n"
-        f"🇰🇷 {brief.get('kr_summary','')}\n\n"
-        f"⚡ 변동성: {brief.get('volatility_outlook','')}"
-    )
+    msg = (f"📊 {brief.get('headline','')}\n\n"
+           f"🇺🇸 {brief.get('us_summary','')}\n"
+           f"🇰🇷 {brief.get('kr_summary','')}\n\n"
+           f"⚡ 변동성: {brief.get('volatility_outlook','')}")
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data={"chat_id": chat, "text": msg}, timeout=15)
+        requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                      data={"chat_id": chat, "text": msg}, timeout=15)
     except Exception as e:
         print("telegram error:", e)
 
 
 def notify_email(brief: dict):
-    """Gmail SMTP로 이메일 발송 (선택). 안 쓰면 환경변수 비워두면 됨.
-    SMTP_USER: 보내는 Gmail 주소
-    SMTP_PASS: Gmail '앱 비밀번호'(2단계 인증 후 발급)
-    EMAIL_TO : 받는 주소(미지정 시 SMTP_USER로)"""
     import smtplib
     from email.mime.text import MIMEText
-
     user = os.environ.get("SMTP_USER")
     pw = os.environ.get("SMTP_PASS")
     if not (user and pw):
         return
     to = os.environ.get("EMAIL_TO", user)
-
     issues = "\n".join(f"• {i}" for i in brief.get("key_issues", []))
-    body = (
-        f"[오늘의 한미 증시 브리핑]\n\n"
-        f"■ {brief.get('headline','')}\n\n"
-        f"🇺🇸 미국: {brief.get('us_summary','')}\n\n"
-        f"🇰🇷 한국: {brief.get('kr_summary','')}\n\n"
-        f"🗣 여론: {brief.get('sentiment','')}\n\n"
-        f"⚡ 변동성: {brief.get('volatility_outlook','')}\n\n"
-        f"주요 이슈:\n{issues}\n\n"
-        f"※ 정보 제공용이며 투자 권유가 아닙니다."
-    )
+    body = (f"[오늘의 한미 증시 브리핑]\n\n"
+            f"■ {brief.get('headline','')}\n\n"
+            f"🇺🇸 미국: {brief.get('us_summary','')}\n\n"
+            f"🇰🇷 한국: {brief.get('kr_summary','')}\n\n"
+            f"🗣 여론: {brief.get('sentiment','')}\n\n"
+            f"⚡ 변동성: {brief.get('volatility_outlook','')}\n\n"
+            f"주요 이슈:\n{issues}\n\n"
+            f"※ 정보 제공용이며 투자 권유가 아닙니다.")
     m = MIMEText(body, "plain", "utf-8")
     m["Subject"] = f"📊 {brief.get('headline','증시 브리핑')}"
     m["From"], m["To"] = user, to
@@ -324,7 +330,10 @@ def main():
     metrics = {name: analyze_ticker(name, sym, "지표") for name, sym in TICKERS.items()}
     metrics.update({name: analyze_ticker(name, sym, "ETF") for name, sym in ETF_TICKERS.items()})
     news = fetch_news()
-    featured = screener.featured_stocks(top=8)
+    try:
+        featured = screener.featured_stocks(top=8)
+    except Exception as e:
+        featured = {"date": None, "items": [], "error": f"screener 오류: {e}"}
     holdings = {name: analyze_ticker(name, sym, "보유") for name, sym in HOLDINGS.items()}
     brief = run_llm(metrics, news, featured, holdings)
 
@@ -340,7 +349,7 @@ def main():
 
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
+        json.dump(_clean(out), f, ensure_ascii=False, indent=2, allow_nan=False)
     print("saved:", OUT_PATH)
 
     notify_telegram(brief)
