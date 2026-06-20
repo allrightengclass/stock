@@ -334,11 +334,15 @@ ETF(SCHD·SPY·VOO·SOXX·ITA 등)는 개별주와 달리 재료·실적 축을 
 금이 오르며 증시가 약하면 위험회피 국면이다. 이 해석을 volatility_outlook과 key_issues에 반영하라.
 theme_plays는 오늘 뉴스·호재에서 포착되는 테마 1~2개에 대해, 밸류체인 수혜 종목을 rank 순위로 제시한다.
 밸류체인은 대장주에서 멈추지 말고 후방까지 깊게 전개하라: 완제품·대장주 → 핵심 부품/장비 → 소재 → 전력·인프라 → 후공정/유통.
-picks에는 누구나 아는 대형주만 넣지 말고, 밸류체인 후방의 '실제 수혜 강도가 큰' 종목을 우선하라.
-예: 'AI 반도체 호황'이면 메모리 대장주(하이닉스·삼성)보다, HBM 후공정 장비(한미반도체)·기판 소재(이수페타시스)·데이터센터 전력기기(LS ELECTRIC·HD현대일렉트릭)·냉각/전력 인프라처럼 직접 노출도가 높은 중소형 수혜주를 발굴해 비교하라.
-국내 종목을 우선하되 글로벌 수혜주도 1~2개 섞어도 된다. picks는 테마당 3~5개로 늘려라.
+[picks 선정 강제 규칙 — 반드시 지켜라]
+1) 누구나 아는 초대형 대장주(삼성전자·SK하이닉스·TSMC·엔비디아·인텔·마이크로소프트·애플 등)는 picks에 '최대 1개'만 허용한다. 0개여도 좋다.
+2) ETF·지수추종 상품(KODEX·SMH·SOXX·QQQ 등)은 picks에 절대 넣지 마라. ETF는 별도 섹션에서 다룬다.
+3) 아래 보유/관심 종목과 겹치는 종목은 picks에서 제외하라(발굴 가치를 위해): {holdings_names}, {watchlist_names}.
+4) picks의 대부분(최소 3개 이상)은 '덜 알려졌지만 수혜가 직접적인 중소형·중견 종목'으로 채워라.
+예: 'AI 반도체 호황'이면 HBM 후공정 장비(한미반도체·이오테크닉스), 기판·소재(이수페타시스·해성디에스·티엘비), 테스트(리노공업), 데이터센터 전력기기(LS ELECTRIC·HD현대일렉트릭·제룡전기), 냉각(GST) 등 구체적 중소형 수혜주를 발굴해 비교하라.
+'방산 호황'이면 한화에어로스페이스·현대로템·LIG넥스원·한국항공우주, 그 후방의 부품·소재주를 발굴하라.
+국내 종목을 우선하되 글로벌 중소형 수혜주도 1~2개 섞어도 된다. picks는 테마당 3~5개.
 각 종목을 차수재시실로 채점하고 reason에 '밸류체인 내 위치와 왜 이 종목의 수혜 강도가 더 직접적인지'를 비교로 쓴다. role에는 밸류체인 단계(예: HBM 후공정 장비)를 명시하라.
-이미 널리 알려진 대장주는 1~2개로 제한하고, 나머지는 덜 알려졌지만 수혜가 직접적인 종목으로 채워 '발굴' 가치를 높여라.
 단, 매수 시점·진입 타이밍·'지금 사라'는 절대 쓰지 마라. 목표가도 단정하지 마라. 순위와 비교 근거까지만 제시하고 결정은 사용자 몫이다.
 모든 종목 표기는 매수 권유가 아니라 채점·분석 결과임을 전제로 한다."""
 
@@ -356,7 +360,9 @@ def run_llm(data: dict, news: dict, featured: dict, holdings: dict, watchlist: d
         news=json.dumps(news, ensure_ascii=False),
         featured=json.dumps(featured, ensure_ascii=False),
         holdings=json.dumps(holdings, ensure_ascii=False),
-        watchlist=json.dumps(watchlist, ensure_ascii=False))
+        watchlist=json.dumps(watchlist, ensure_ascii=False),
+        holdings_names=", ".join(HOLDINGS.keys()),
+        watchlist_names=", ".join(WATCHLIST_TICKERS.keys()))
 
     # 한도(429) 등 일시 오류 시 자동 재시도
     last_err = None
