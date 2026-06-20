@@ -106,6 +106,8 @@ NEWS_QUERIES = {
     "한국증시": "코스피 OR 코스닥 증시",
     "미국증시": "미국 증시 OR S&P500 OR 나스닥",
     "반도체":   "반도체 OR 엔비디아 OR SK하이닉스",
+    "환율·금리": "원달러 환율 OR 미국 금리 OR 연준 OR 국채금리",
+    "지정학·유가": "유가 OR 중동 OR 호르무즈 OR 이란 OR 지정학 증시",
 }
 
 GEMINI_MODEL = "gemini-2.5-flash"   # 현역 무료 모델 (필요시 gemini-2.5-flash-lite)
