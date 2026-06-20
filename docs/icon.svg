@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10243a"/>
+      <stop offset="1" stop-color="#0b0e14"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- 상승 막대 차트 -->
+  <rect x="120" y="300" width="48" height="92" rx="10" fill="#4a90d9"/>
+  <rect x="190" y="250" width="48" height="142" rx="10" fill="#6ea8ff"/>
+  <rect x="260" y="280" width="48" height="112" rx="10" fill="#9b6dff"/>
+  <rect x="330" y="200" width="48" height="192" rx="10" fill="#26d07c"/>
+  <!-- 상승 화살표 라인 -->
+  <polyline points="128,250 212,200 282,228 366,150"
+    fill="none" stroke="#26d07c" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="366,150 332,156 360,184" fill="#26d07c"/>
+  <!-- KR · US 텍스트 -->
+  <text x="256" y="150" font-family="Arial, sans-serif" font-size="64" font-weight="800"
+    fill="#e8edf4" text-anchor="middle" letter-spacing="2">KR·US</text>
+</svg>
