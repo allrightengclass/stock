@@ -208,6 +208,14 @@
   .chart-legend{display:flex;gap:14px;flex-wrap:wrap;margin:-4px 0 12px;font-size:12px;color:var(--dim)}
   .chart-legend span{display:flex;align-items:center;gap:5px}
   .chart-legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+  /* 주간 흐름 차트 */
+  .wk-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:16px 18px 18px;margin-bottom:14px}
+  .wk-title{font-size:15px;font-weight:700;color:var(--ink);margin-bottom:12px;
+    display:flex;align-items:center;gap:7px}
+  .wk-charts{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:720px){.wk-charts{grid-template-columns:1fr;gap:22px}}
+  .wk-chart canvas{max-height:210px}
 
   /* 신호등 */
   .signal{font-size:13px}
@@ -389,6 +397,24 @@ async function load(){
     </div>`;
   }
 
+  // ①-1 이번 주 흐름 (주간 라인 + 등락률)
+  const wkKeys = ["코스피","나스닥","S&P500"];
+  const wk = data.weekly||{};
+  if(wkKeys.some(k=>wk[k])){
+    h += `<div class="section-label">이번 주 흐름</div>`;
+    h += `<div class="legend">📈 최근 5거래일 지수 흐름 · <b>라인=종가</b>, <b>막대=일별 등락률</b> (초록 상승 / 빨강 하락) · 한국과 미국 시장을 함께 봅니다</div>`;
+    wkKeys.forEach((k,i)=>{
+      if(!wk[k]) return;
+      const flag = /코스피/.test(k) ? "🇰🇷" : "🇺🇸";
+      h += `<div class="wk-card" data-fade>
+        <div class="wk-title">${flag} ${k}</div>
+        <div class="wk-charts">
+          <div class="wk-chart"><canvas id="wkline_${i}"></canvas></div>
+          <div class="wk-chart"><canvas id="wkbar_${i}"></canvas></div>
+        </div></div>`;
+    });
+  }
+
   // ② 주요 이슈
   if(b.key_issues?.length){
     h += `<div class="section-label">주요 이슈</div><ul class="issues" data-fade>`;
@@ -565,6 +591,35 @@ async function load(){
 
   // 페이드 스태거
   document.querySelectorAll("[data-fade]").forEach((el,i)=>el.style.animationDelay=(i*40)+"ms");
+
+  // 주간 흐름 차트 렌더 (라인=종가, 막대=등락률)
+  wkKeys.forEach((k,i)=>{
+    const w = wk[k];
+    if(!w) return;
+    const upC="#26d07c", dnC="#ff5a6e";
+    const ptCols = (w.chg||[]).map(c=>c>=0?upC:dnC);
+    const lc = document.getElementById("wkline_"+i);
+    if(lc) new Chart(lc,{
+      type:"line",
+      data:{labels:w.dates,datasets:[{data:w.close,borderColor:"#6ea8ff",
+        backgroundColor:"rgba(110,168,255,.12)",fill:true,tension:.35,
+        pointBackgroundColor:ptCols,pointBorderColor:ptCols,pointRadius:4,borderWidth:2}]},
+      options:{plugins:{legend:{display:false},
+        title:{display:true,text:"종가 흐름",color:"#8a97a8",font:{family:"Pretendard",size:11}}},
+        scales:{x:{ticks:{color:"#8a97a8",font:{family:"'IBM Plex Mono'",size:10}},grid:{display:false}},
+          y:{ticks:{color:"#8a97a8",font:{family:"'IBM Plex Mono'",size:9}},grid:{color:"#1f2733"}}}}
+    });
+    const bc = document.getElementById("wkbar_"+i);
+    if(bc) new Chart(bc,{
+      type:"bar",
+      data:{labels:w.dates,datasets:[{data:w.chg,
+        backgroundColor:(w.chg||[]).map(c=>c>=0?upC:dnC),borderRadius:5}]},
+      options:{plugins:{legend:{display:false},
+        title:{display:true,text:"일별 등락률(%)",color:"#8a97a8",font:{family:"Pretendard",size:11}}},
+        scales:{x:{ticks:{color:"#8a97a8",font:{family:"'IBM Plex Mono'",size:10}},grid:{display:false}},
+          y:{ticks:{color:"#8a97a8",callback:v=>v+"%",font:{family:"'IBM Plex Mono'",size:9}},grid:{color:"#1f2733"}}}}
+    });
+  });
 
   // 차트 렌더 (지표 그룹별 색상)
   const grpColor = n =>
