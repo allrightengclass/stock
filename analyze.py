@@ -228,6 +228,29 @@ def fetch_earnings(symbol: str) -> dict:
 
 
 # ── 여론(뉴스) 수집 ────────────────────────────────────────
+def fetch_weekly(symbol: str, name: str) -> dict:
+    """최근 5거래일 종가 + 일별 등락률. 주간 흐름 차트용."""
+    try:
+        df = yf.Ticker(symbol).history(period="12d", interval="1d")
+        close = df["Close"].dropna()
+        if len(close) < 2:
+            return None
+        recent = close.tail(6)              # 등락률 계산 위해 6일(직전 1일 포함)
+        dates, vals, chgs = [], [], []
+        prev = None
+        for ts, v in recent.items():
+            v = float(v)
+            if prev is not None:
+                dates.append(f"{ts.month}/{ts.day}")
+                vals.append(round(v, 2))
+                chgs.append(round((v - prev) / prev * 100, 2))
+            prev = v
+        # 최근 5일만
+        return {"name": name, "dates": dates[-5:], "close": vals[-5:], "chg": chgs[-5:]}
+    except Exception:
+        return None
+
+
 def fetch_news(per_query: int = 4) -> dict:
     out = {}
     for label, q in NEWS_QUERIES.items():
@@ -443,6 +466,12 @@ def main():
 
     metrics = {name: analyze_ticker(name, sym, "지표") for name, sym in TICKERS.items()}
     metrics.update({name: analyze_ticker(name, sym, "ETF") for name, sym in ETF_TICKERS.items()})
+
+    weekly = {
+        "코스피":  fetch_weekly("^KS11", "코스피"),
+        "나스닥":  fetch_weekly("^IXIC", "나스닥"),
+        "S&P500": fetch_weekly("^GSPC", "S&P500"),
+    }
     news = fetch_news()
     try:
         featured = screener.featured_stocks(top=8)
@@ -465,6 +494,7 @@ def main():
     out = {
         "updated_at": now.strftime("%Y-%m-%d %H:%M KST"),
         "metrics": metrics,
+        "weekly": weekly,
         "news": news,
         "featured": featured,
         "holdings": holdings,
