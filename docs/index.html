@@ -216,6 +216,13 @@
   .wk-charts{display:grid;grid-template-columns:1fr 1fr;gap:18px}
   @media(max-width:720px){.wk-charts{grid-template-columns:1fr;gap:22px}}
   .wk-chart canvas{max-height:210px}
+  /* 포트폴리오 구성 */
+  .pf-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:720px){.pf-grid{grid-template-columns:1fr}}
+  .pf-cells{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start}
+  .pf-note{margin-top:12px;font-size:12.5px;color:var(--dim);line-height:1.6;
+    background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 14px}
+  #pf-donut{max-height:240px}
 
   /* 신호등 */
   .signal{font-size:13px}
@@ -511,6 +518,7 @@ async function load(){
 
   // ⑨ 진입가 점검 (보유 종목 선택 시 현재가 자동 채움)
   window.HOLDINGS_DATA = {...(data.holdings||{}), ...(data.watchlist_stocks||{})};
+  window.FX_KRW = (m["원/달러"]&&m["원/달러"].last)||1380;
   let opts = `<option value="">— 보유 종목 선택 또는 직접 입력 —</option>`;
   Object.entries(window.HOLDINGS_DATA).forEach(([nm,d])=>{
     if(d && !d.error && d.last!=null) opts += `<option value="${nm}">${nm} (현재가 ${fmtNum(d.last)})</option>`;
@@ -529,11 +537,23 @@ async function load(){
     </div>
     <div class="row">
       <div><label>목표가</label><input id="ck-target" type="number" inputmode="decimal" placeholder="380000"></div>
-      <div></div>
+      <div><label>보유 수량 (포트폴리오 구성용)</label><input id="ck-qty" type="number" inputmode="decimal" placeholder="30"></div>
     </div>
     <button class="chk-btn" onclick="runChecker()">점검하기</button>
     <div class="chk-out" id="ck-out"></div>
   </div>`;
+
+  // ⑨-1 포트폴리오 구성 (수량 입력된 종목 집계)
+  h += `<div class="section-label">포트폴리오 구성 · 쏠림 점검</div>
+  <div class="legend">🧩 위 점검 도구에 <b>평단·수량</b>을 넣은 종목을 모아 <b>비중·섹터 쏠림·상위 집중도</b>를 계산합니다 · 해외 종목은 원/달러 환율로 환산 · 이 기기에만 저장</div>
+  <div class="pf-wrap" data-fade id="pf-wrap" style="display:none">
+    <div class="pf-grid">
+      <div class="chartbox" style="margin:0"><canvas id="pf-donut"></canvas></div>
+      <div class="pf-cells" id="pf-cells"></div>
+    </div>
+    <div class="pf-note" id="pf-note"></div>
+  </div>
+  <div class="card" data-fade id="pf-empty"><p style="font-size:13.5px;color:var(--dim)">아직 수량이 입력된 종목이 없습니다. 위 점검 도구에서 종목을 고르고 <b>평단과 수량</b>을 넣어 '점검하기'를 누르면 여기에 자동으로 집계됩니다.</p></div>`;
 
   // ⑩ 실시간 지표 + 차트 + ETF
   h += `<div class="section-label">실시간 지표</div>` + renderQuotes(idx);
@@ -591,6 +611,7 @@ async function load(){
 
   // 페이드 스태거
   document.querySelectorAll("[data-fade]").forEach((el,i)=>el.style.animationDelay=(i*40)+"ms");
+  if(window.renderPortfolio) renderPortfolio();
 
   // 주간 흐름 차트 렌더 (라인=종가, 막대=등락률)
   wkKeys.forEach((k,i)=>{
@@ -686,6 +707,7 @@ function pickHolding(){
     document.getElementById("ck-buy").value=saved.buy||"";
     document.getElementById("ck-stop").value=saved.stop||"";
     document.getElementById("ck-target").value=saved.target||"";
+    document.getElementById("ck-qty").value=saved.qty||"";
   }catch(e){}
   document.getElementById("ck-buy").focus();
 }
@@ -703,7 +725,9 @@ function runChecker(){
     out.innerHTML=`<div class="chk-note" style="border:none">현재가와 평단을 입력해주세요.</div>`; return; }
 
   // 저장 (이 기기 한정)
-  try{ localStorage.setItem("ck_"+name, JSON.stringify({buy,stop,target})); }catch(e){}
+  const qty=parseFloat(document.getElementById("ck-qty").value)||null;
+  try{ localStorage.setItem("ck_"+name, JSON.stringify({buy,stop,target,qty})); }catch(e){}
+  if(window.renderPortfolio) renderPortfolio();
 
   // 손절가 미입력 시 평단 −10% 예시
   const stopUsed = stop || Math.round(buy*0.90);
@@ -731,6 +755,88 @@ function runChecker(){
   out.style.display="grid"; out.innerHTML=alert+cells;
 }
 window.runChecker=runChecker;
+
+// ── 포트폴리오 구성 (localStorage 집계) ─────────────────
+const SECTOR_MAP = [
+  [/삼성전자|하이닉스|TSMC|엔비디아|인텔/, "반도체"],
+  [/애플|마이크로소프트|알파벳|아마존|넷플릭스|팔란티어/, "빅테크·AI"],
+  [/현대차|현대모비스|테슬라/, "자동차·모빌리티"],
+  [/LG이노텍/, "전자부품"],
+  [/스페이스X/, "우주·방산"],
+  [/엑슨모빌/, "에너지"],
+  [/스타벅스|나이키|P&G/, "소비재"],
+  [/JP모건/, "금융"],
+  [/릴리/, "헬스케어"],
+  [/SPY|VOO|SCHD|SOXX|ITA|QQQ|TQQQ|KODEX|TIGER|SMH|ETF/, "ETF·지수"],
+];
+const sectorOf = n => { for(const [re,s] of SECTOR_MAP) if(re.test(n)) return s; return "기타"; };
+
+function renderPortfolio(){
+  const wrap=document.getElementById("pf-wrap"), empty=document.getElementById("pf-empty");
+  if(!wrap) return;
+  const fx=window.FX_KRW||1380;
+  const rows=[];
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(!k||!k.startsWith("ck_")) continue;
+      const name=k.slice(3);
+      let s; try{ s=JSON.parse(localStorage.getItem(k)||"{}"); }catch(e){ continue; }
+      if(!s.qty||!s.buy) continue;
+      const d=(window.HOLDINGS_DATA||{})[name];
+      const price=(d&&d.last!=null)?d.last:s.buy;
+      const sym=(d&&d.symbol)||"";
+      const isKRW = sym.endsWith(".KS") || (!sym && s.buy>=2000);
+      const mul = isKRW?1:fx;
+      rows.push({name, sector:sectorOf(name),
+        value:s.qty*price*mul, cost:s.qty*s.buy*mul});
+    }
+  }catch(e){}
+  if(!rows.length){ wrap.style.display="none"; if(empty) empty.style.display=""; return; }
+  if(empty) empty.style.display="none";
+  wrap.style.display="";
+
+  const total=rows.reduce((a,r)=>a+r.value,0);
+  const cost=rows.reduce((a,r)=>a+r.cost,0);
+  const pnl=total-cost, pnlPct=cost?(pnl/cost*100):0;
+  rows.sort((a,b)=>b.value-a.value);
+  const top3=rows.slice(0,3).reduce((a,r)=>a+r.value,0)/total*100;
+
+  const secAgg={};
+  rows.forEach(r=>{ secAgg[r.sector]=(secAgg[r.sector]||0)+r.value; });
+  const secs=Object.entries(secAgg).sort((a,b)=>b[1]-a[1]);
+  const maxSec=secs[0], maxSecPct=maxSec[1]/total*100;
+
+  const fmtW = v => v>=1e8 ? (v/1e8).toFixed(2)+"억" : Math.round(v/1e4).toLocaleString()+"만";
+  const cells=document.getElementById("pf-cells");
+  cells.innerHTML=`
+    <div class="chk-cell"><div class="ck">총 평가액 (원화 환산)</div><div class="cv">${fmtW(total)}원</div></div>
+    <div class="chk-cell"><div class="ck">총 손익</div><div class="cv ${pnl>=0?'up':'down'}">${pnl>=0?"+":""}${pnlPct.toFixed(1)}%</div></div>
+    <div class="chk-cell"><div class="ck">상위 3종목 집중도</div><div class="cv ${top3>60?'down':''}">${top3.toFixed(0)}%</div></div>
+    <div class="chk-cell"><div class="ck">최대 섹터 · ${maxSec[0]}</div><div class="cv ${maxSecPct>50?'down':''}">${maxSecPct.toFixed(0)}%</div></div>`;
+
+  let warn="";
+  if(maxSecPct>50) warn+=`⚠ <b>${maxSec[0]}</b> 비중이 ${maxSecPct.toFixed(0)}%로 절반을 넘습니다 — 해당 섹터 조정 시 계좌 전체가 흔들리는 구조입니다. `;
+  if(top3>60) warn+=`⚠ 상위 3종목이 ${top3.toFixed(0)}%로 집중돼 있습니다. `;
+  if(!warn) warn="분산 상태가 비교적 양호합니다. ";
+  const topList=rows.slice(0,5).map(r=>`${r.name} ${(r.value/total*100).toFixed(0)}%`).join(" · ");
+  document.getElementById("pf-note").innerHTML=
+    `<b>비중 상위:</b> ${topList}<br>${warn}환율 ${Math.round(fx).toLocaleString()}원/달러 환산 · 참고용이며 매매 지시가 아닙니다.`;
+
+  const palette=["#6ea8ff","#26d07c","#9b6dff","#e7c14e","#ff5a9e","#4fd8e0","#ff8a5c","#8a97a8"];
+  const ctx=document.getElementById("pf-donut");
+  if(window.pfChart) window.pfChart.destroy();
+  window.pfChart=new Chart(ctx,{type:"doughnut",
+    data:{labels:secs.map(s=>s[0]),
+      datasets:[{data:secs.map(s=>Math.round(s[1]/total*1000)/10),
+        backgroundColor:secs.map((_,i)=>palette[i%palette.length]),borderColor:"#121722",borderWidth:2}]},
+    options:{plugins:{legend:{position:"right",labels:{color:"#cdd5e1",font:{family:"Pretendard",size:12},
+      generateLabels:c=>c.data.labels.map((l,i)=>({text:`${l} ${c.data.datasets[0].data[i]}%`,
+        fillStyle:c.data.datasets[0].backgroundColor[i],strokeStyle:"transparent",index:i}))}},
+      title:{display:true,text:"섹터별 비중(%)",color:"#8a97a8",font:{family:"Pretendard",size:11}}}}
+  });
+}
+window.renderPortfolio=renderPortfolio;
 </script>
 </body>
 </html>
