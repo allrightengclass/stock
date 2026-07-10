@@ -491,6 +491,36 @@ def main():
 
     brief = run_llm(metrics, news, featured, holdings, watchlist_stocks)
 
+    # A. 등급 변화 감지 (직전 data.json과 신호등 비교)
+    def _sig(g):
+        if not g:
+            return None
+        if ("비중확대" in g) or ("코어유지" in g):
+            return "🟢"
+        if ("관심" in g) or ("단기" in g):
+            return "🟡"
+        return "🔴"
+
+    prev_grades = {}
+    try:
+        with open(OUT_PATH, encoding="utf-8") as f:
+            _old = json.load(f)
+        for sec in ("holdings_scores", "watchlist_scores"):
+            for it in (_old.get("brief") or {}).get(sec) or []:
+                if it.get("name"):
+                    prev_grades[it["name"]] = it.get("grade", "")
+    except Exception:
+        pass
+
+    grade_changes = []
+    for sec in ("holdings_scores", "watchlist_scores"):
+        for it in brief.get(sec) or []:
+            n = it.get("name")
+            og, ng = prev_grades.get(n), it.get("grade", "")
+            if og and ng and _sig(og) != _sig(ng):
+                grade_changes.append({"name": n, "from": _sig(og), "to": _sig(ng),
+                                      "from_grade": og, "to_grade": ng})
+
     out = {
         "updated_at": now.strftime("%Y-%m-%d %H:%M KST"),
         "metrics": metrics,
@@ -500,6 +530,7 @@ def main():
         "holdings": holdings,
         "watchlist_stocks": watchlist_stocks,
         "brief": brief,
+        "grade_changes": grade_changes,
         "disclaimer": "본 자료는 정보 제공·참고용이며 투자 권유가 아닙니다. 모든 투자 판단과 책임은 본인에게 있습니다.",
     }
 
