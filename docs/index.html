@@ -260,6 +260,10 @@
   .fold[open] summary{border-bottom:1px solid var(--line)}
   .fold[open] .fold-hint{display:none}
   .fold-body{padding:15px 16px 17px}
+  /* 블록 구분 라벨 */
+  .bigdiv{margin:44px 0 6px;padding:13px 16px;border-radius:12px;
+    background:linear-gradient(135deg,#162132,#101623);border:1px solid #2a3a55;
+    font-family:Fraunces,serif;font-size:17px;font-weight:600;color:#dbe6f5;letter-spacing:.01em}
 
   /* 신호등 */
   .signal{font-size:13px}
@@ -445,24 +449,6 @@ async function load(){
     </div>`;
   }
 
-  // ①-1 이번 주 흐름 (주간 라인 + 등락률)
-  const wkKeys = ["코스피","나스닥","S&P500"];
-  const wk = data.weekly||{};
-  if(wkKeys.some(k=>wk[k])){
-    h += `<div class="section-label">이번 주 흐름</div>`;
-    h += `<div class="legend">📈 최근 5거래일 지수 흐름 · <b>라인=종가</b>, <b>막대=일별 등락률</b> (초록 상승 / 빨강 하락) · 한국과 미국 시장을 함께 봅니다</div>`;
-    wkKeys.forEach((k,i)=>{
-      if(!wk[k]) return;
-      const flag = /코스피/.test(k) ? "🇰🇷" : "🇺🇸";
-      h += `<div class="wk-card" data-fade>
-        <div class="wk-title">${flag} ${k}</div>
-        <div class="wk-charts">
-          <div class="wk-chart"><canvas id="wkline_${i}"></canvas></div>
-          <div class="wk-chart"><canvas id="wkbar_${i}"></canvas></div>
-        </div></div>`;
-    });
-  }
-
   // A. 등급 변화 알림 (어제 대비)
   const gch = data.grade_changes||[];
   if(gch.length){
@@ -483,6 +469,8 @@ async function load(){
     <div class="stk-body">${earningsBadge(meta)}<div class="gauges">${gaugeHtml(p.scores)}</div>
       <p>${p.comment||""}</p>${p.caution?`<div class="caution">⚠ ${p.caution}</div>`:""}</div>
   </details>`;
+
+  h += `<div class="bigdiv" data-fade>📌 내 자산 점검</div>`;
 
   // ⑦ 내 보유 종목 (요약행 · 탭하면 상세)
   if(b.holdings_scores?.length){
@@ -541,26 +529,36 @@ async function load(){
   <div class="card" data-fade id="pf-empty"><p style="font-size:13.5px;color:var(--dim)">아직 수량이 입력된 종목이 없습니다. 위 점검 도구에서 종목을 고르고 <b>평단과 수량</b>을 넣어 '점검하기'를 누르면 여기에 자동으로 집계됩니다.</p></div>`;
 
 
-  // ② 주요 이슈
-  if(b.key_issues?.length){
-    h += `<div class="section-label">주요 이슈</div><ul class="issues" data-fade>`;
-    b.key_issues.forEach(i=>h+=`<li>${i}</li>`);
-    h += `</ul>`;
+  h += `<div class="bigdiv" data-fade>🌐 시장 상세</div>`;
+
+  // ①-1 이번 주 흐름 (주간 라인 + 등락률)
+  const wkKeys = ["코스피","나스닥","S&P500"];
+  const wk = data.weekly||{};
+  if(wkKeys.some(k=>wk[k])){
+    h += `<div class="section-label">이번 주 흐름</div>`;
+    h += `<div class="legend">📈 최근 5거래일 지수 흐름 · <b>라인=종가</b>, <b>막대=일별 등락률</b> (초록 상승 / 빨강 하락) · 한국과 미국 시장을 함께 봅니다</div>`;
+    wkKeys.forEach((k,i)=>{
+      if(!wk[k]) return;
+      const flag = /코스피/.test(k) ? "🇰🇷" : "🇺🇸";
+      h += `<div class="wk-card" data-fade>
+        <div class="wk-title">${flag} ${k}</div>
+        <div class="wk-charts">
+          <div class="wk-chart"><canvas id="wkline_${i}"></canvas></div>
+          <div class="wk-chart"><canvas id="wkbar_${i}"></canvas></div>
+        </div></div>`;
+    });
   }
 
-  // ②-1 최신 뉴스 (주요 이슈 아래)
-  const nw = data.news||{};
-  if(Object.keys(nw).length){
-    let nwh = `<div class="grid" style="gap:18px">`;
-    for(const cat in nw){
-      nwh += `<div class="card"><h3>📰 ${cat}</h3><ul style="list-style:none;display:grid;gap:8px;margin-top:4px">`;
-      nw[cat].forEach(n=>{
-        nwh += `<li style="font-size:13.5px;color:#c8d0dc;line-height:1.5">${n.title}</li>`;
-      });
-      nwh += `</ul></div>`;
-    }
-    nwh += `</div>`;
-    h += `<details class="fold" id="sec-news" data-fade><summary>📰 최신 뉴스 <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${nwh}</div></details>`;
+  // ⑤ 미국·한국 증시 요약 + 변동성 예측 + 여론
+  h += `<div class="grid summ">
+    <div class="card" data-fade><h3>🇺🇸 미국 증시</h3><p>${b.us_summary||"—"}</p></div>
+    <div class="card" data-fade><h3>🇰🇷 한국 증시</h3><p>${b.kr_summary||"—"}</p></div>
+  </div>`;
+  if(b.volatility_outlook){
+    h += `<div class="vol" data-fade><div class="lab">⚡ 오늘의 변동성 예측</div><p>${b.volatility_outlook}</p></div>`;
+  }
+  if(b.sentiment){
+    h += `<div class="vol" data-fade style="margin-top:14px;background:linear-gradient(135deg,var(--panel),#171019)"><div class="lab">🗣 뉴스·여론 심리</div><p>${b.sentiment}</p></div>`;
   }
 
   // ③ 변동성 시나리오
@@ -572,6 +570,13 @@ async function load(){
         <div class="d">${s.desc||""}</div></div>`;
     });
     h += `</div>`;
+  }
+
+  // ② 주요 이슈
+  if(b.key_issues?.length){
+    h += `<div class="section-label">주요 이슈</div><ul class="issues" data-fade>`;
+    b.key_issues.forEach(i=>h+=`<li>${i}</li>`);
+    h += `</ul>`;
   }
 
   // ④ 리스크·역발상
@@ -588,30 +593,19 @@ async function load(){
     h += `</div>`;
   }
 
-  // ⑤ 미국·한국 증시 요약 + 변동성 예측 + 여론
-  h += `<div class="grid summ">
-    <div class="card" data-fade><h3>🇺🇸 미국 증시</h3><p>${b.us_summary||"—"}</p></div>
-    <div class="card" data-fade><h3>🇰🇷 한국 증시</h3><p>${b.kr_summary||"—"}</p></div>
-  </div>`;
-  if(b.volatility_outlook){
-    h += `<div class="vol" data-fade><div class="lab">⚡ 오늘의 변동성 예측</div><p>${b.volatility_outlook}</p></div>`;
-  }
-  if(b.sentiment){
-    h += `<div class="vol" data-fade style="margin-top:14px;background:linear-gradient(135deg,var(--panel),#171019)"><div class="lab">🗣 뉴스·여론 심리</div><p>${b.sentiment}</p></div>`;
-  }
-
-  // ⑧ 특징주 (차수재시실) + 레이더
-  if(b.stock_scores?.length){
-    const fdate = (data.featured&&data.featured.date)||"";
-    let fh = scoreLegend + `<div class="grid" style="gap:12px">`;
-    b.stock_scores.forEach(p=>{ fh+=renderScoreCard(p); });
-    fh+=`</div>`;
-    if(b.stock_scores.length>=2){
-      fh+=`<div class="section-label">종목 비교 (5축 레이더)</div><div class="chartbox"><canvas id="radar"></canvas></div>`;
+  // ②-1 최신 뉴스 (주요 이슈 아래)
+  const nw = data.news||{};
+  if(Object.keys(nw).length){
+    let nwh = `<div class="grid" style="gap:18px">`;
+    for(const cat in nw){
+      nwh += `<div class="card"><h3>📰 ${cat}</h3><ul style="list-style:none;display:grid;gap:8px;margin-top:4px">`;
+      nw[cat].forEach(n=>{
+        nwh += `<li style="font-size:13.5px;color:#c8d0dc;line-height:1.5">${n.title}</li>`;
+      });
+      nwh += `</ul></div>`;
     }
-    h += `<details class="fold" id="fold-feat" data-fade><summary>⭐ 특징주 채점${fdate?` (${fdate})`:""} <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${fh}</div></details>`;
-  } else if(data.featured && data.featured.error){
-    h += `<div class="section-label">특징주</div><div class="card" data-fade><p class="err" style="font-size:13px">KRX 데이터 일시 불가 — 뉴스 기반 분석으로 대체되었습니다.</p></div>`;
+    nwh += `</div>`;
+    h += `<details class="fold" id="sec-news" data-fade><summary>📰 최신 뉴스 <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${nwh}</div></details>`;
   }
 
   // ⑩ 실시간 지표 + 차트 + ETF
@@ -638,13 +632,7 @@ async function load(){
     h += `<details class="fold" data-fade${allMet?" open":""}><summary>🔭 관찰 트리거 · 전환 확인 <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${th}</div></details>`;
   }
 
-  // ⑫ 워치리스트
-  if(b.watchlist?.length){
-    let wh = `<ul class="issues">`;
-    b.watchlist.forEach(i=>wh+=`<li>${i}</li>`);
-    wh += `</ul>`;
-    h += `<details class="fold" data-fade><summary>👁 주목 종목·섹터 <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${wh}</div></details>`;
-  }
+  h += `<div class="bigdiv" data-fade>🔍 기회 발굴</div>`;
 
   // ⑫-1 테마 연결 · 수혜주 발굴
   if(b.theme_plays?.length){
@@ -666,6 +654,28 @@ async function load(){
       });
       h += `</div></div>`;
     });
+  }
+
+  // ⑧ 특징주 (차수재시실) + 레이더
+  if(b.stock_scores?.length){
+    const fdate = (data.featured&&data.featured.date)||"";
+    let fh = scoreLegend + `<div class="grid" style="gap:12px">`;
+    b.stock_scores.forEach(p=>{ fh+=renderScoreCard(p); });
+    fh+=`</div>`;
+    if(b.stock_scores.length>=2){
+      fh+=`<div class="section-label">종목 비교 (5축 레이더)</div><div class="chartbox"><canvas id="radar"></canvas></div>`;
+    }
+    h += `<details class="fold" id="fold-feat" data-fade><summary>⭐ 특징주 채점${fdate?` (${fdate})`:""} <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${fh}</div></details>`;
+  } else if(data.featured && data.featured.error){
+    h += `<div class="section-label">특징주</div><div class="card" data-fade><p class="err" style="font-size:13px">KRX 데이터 일시 불가 — 뉴스 기반 분석으로 대체되었습니다.</p></div>`;
+  }
+
+  // ⑫ 워치리스트
+  if(b.watchlist?.length){
+    let wh = `<ul class="issues">`;
+    b.watchlist.forEach(i=>wh+=`<li>${i}</li>`);
+    wh += `</ul>`;
+    h += `<details class="fold" data-fade><summary>👁 주목 종목·섹터 <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${wh}</div></details>`;
   }
 
   document.getElementById("content").innerHTML = h;
