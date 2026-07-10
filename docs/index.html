@@ -223,6 +223,43 @@
   .pf-note{margin-top:12px;font-size:12.5px;color:var(--dim);line-height:1.6;
     background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 14px}
   #pf-donut{max-height:240px}
+  /* 목차 바 */
+  .topnav{position:sticky;top:0;z-index:40;display:flex;gap:6px;overflow-x:auto;
+    background:rgba(11,14,20,.92);backdrop-filter:blur(8px);padding:9px 2px;margin:0 -2px 18px;
+    border-bottom:1px solid var(--line);-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .topnav::-webkit-scrollbar{display:none}
+  .topnav a{flex-shrink:0;font-size:12px;color:var(--dim);text-decoration:none;
+    background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:6px 12px;white-space:nowrap}
+  .topnav a:active{color:var(--ink);border-color:var(--accent)}
+  /* 등급 변화 배지 */
+  .gch{background:linear-gradient(135deg,#1d1526,#141019);border:1px solid rgba(155,109,255,.35);
+    border-radius:13px;padding:14px 16px;margin:0 0 16px}
+  .gch-t{font-size:12.5px;font-weight:700;color:#b18cff;margin-bottom:8px}
+  .gch-list{display:flex;gap:8px;flex-wrap:wrap}
+  .gch-item{font-size:12.5px;color:#dde4ee;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;padding:6px 10px}
+  .gch-item i{color:var(--faint);font-style:normal;font-size:11px}
+  /* 접이식 종목 행 */
+  .stk-list{display:grid;gap:7px}
+  .stk{background:var(--panel);border:1px solid var(--line);border-radius:11px;overflow:hidden}
+  .stk summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:12px 15px}
+  .stk summary::-webkit-details-marker{display:none}
+  .stk-sig{font-size:13px}
+  .stk-nm{font-weight:600;font-size:14.5px;color:var(--ink);flex:1}
+  .stk-arrow{color:var(--faint);font-size:11px;transition:transform .2s}
+  .stk[open] .stk-arrow{transform:rotate(180deg)}
+  .stk[open] summary{border-bottom:1px solid var(--line)}
+  .stk-body{padding:13px 15px 15px}
+  .stk-body p{font-size:13.5px;color:#cdd5e1}
+  /* 접이식 섹션 */
+  .fold{background:var(--panel);border:1px solid var(--line);border-radius:13px;margin:22px 0;overflow:hidden}
+  .fold summary{list-style:none;cursor:pointer;padding:14px 17px;font-size:14px;font-weight:600;color:var(--ink);
+    display:flex;align-items:center;gap:8px}
+  .fold summary::-webkit-details-marker{display:none}
+  .fold-hint{margin-left:auto;font-size:11px;font-weight:400;color:var(--faint)}
+  .fold[open] summary{border-bottom:1px solid var(--line)}
+  .fold[open] .fold-hint{display:none}
+  .fold-body{padding:15px 16px 17px}
 
   /* 신호등 */
   .signal{font-size:13px}
@@ -282,6 +319,10 @@
       <p><b>꼭 기억할 것</b> — 모든 내용은 참고용 분석이며, 투자 결과의 책임은 본인에게 있습니다.</p>
     </div>
   </details>
+
+  <nav class="topnav" id="topnav">
+    <a href="#sec-hold">📌 보유</a><a href="#sec-watch">👀 관심</a><a href="#sec-check">✂️ 손절점검</a><a href="#sec-pf">🧩 포트폴리오</a><a href="#sec-news">📰 뉴스</a><a href="#sec-quotes">📊 지표</a><a href="#sec-theme">🔥 테마</a>
+  </nav>
 
   <div id="content"></div>
 
@@ -422,6 +463,84 @@ async function load(){
     });
   }
 
+  // A. 등급 변화 알림 (어제 대비)
+  const gch = data.grade_changes||[];
+  if(gch.length){
+    h += `<div class="gch" data-fade><div class="gch-t">🔔 어제와 달라진 종목</div><div class="gch-list">`;
+    gch.forEach(c=>{ h+=`<span class="gch-item">${c.name} <b>${c.from}→${c.to}</b> <i>(${c.from_grade}→${c.to_grade})</i></span>`; });
+    h += `</div></div>`;
+  }
+
+  // ⑥ 시황 게이트 (앞으로 이동)
+  if(b.market_gate){
+    h += `<div class="gate" data-fade><div class="lab">🚦 시황 게이트 (시장 전체 환경)</div><p>${b.market_gate}</p></div>`;
+  }
+
+  // 접이식 종목 행 렌더러 (B)
+  const renderCompactCard = (p, meta) => `<details class="stk" data-fade>
+    <summary><span class="stk-sig">${signal(p.grade||"")}</span><span class="stk-nm">${p.name}</span>
+      <span class="grade ${gradeClass(p.grade||"")}">${p.grade||""}</span><span class="stk-arrow">▾</span></summary>
+    <div class="stk-body">${earningsBadge(meta)}<div class="gauges">${gaugeHtml(p.scores)}</div>
+      <p>${p.comment||""}</p>${p.caution?`<div class="caution">⚠ ${p.caution}</div>`:""}</div>
+  </details>`;
+
+  // ⑦ 내 보유 종목 (요약행 · 탭하면 상세)
+  if(b.holdings_scores?.length){
+    const hd = data.holdings||{};
+    h += `<div class="section-label" id="sec-hold">내 보유 종목</div>` + scoreLegend;
+    h += `<div class="legend" style="margin-top:-8px">👆 종목을 <b>탭하면 상세 채점</b>이 펼쳐집니다</div><div class="stk-list">`;
+    b.holdings_scores.forEach(p=>{ h+=renderCompactCard(p, hd[p.name]); });
+    h += `</div>`;
+  }
+
+  // ⑦-1 관심 종목 (요약행)
+  if(b.watchlist_scores?.length){
+    const wd = data.watchlist_stocks||{};
+    h += `<div class="section-label" id="sec-watch">관심 종목 · 미보유 점검</div><div class="stk-list">`;
+    b.watchlist_scores.forEach(p=>{ h+=renderCompactCard(p, wd[p.name]); });
+    h += `</div>`;
+  }
+
+  // ⑨ 진입가 점검 (보유 종목 선택 시 현재가 자동 채움)
+  window.HOLDINGS_DATA = {...(data.holdings||{}), ...(data.watchlist_stocks||{})};
+  window.FX_KRW = (m["원/달러"]&&m["원/달러"].last)||1380;
+  let opts = `<option value="">— 보유 종목 선택 또는 직접 입력 —</option>`;
+  Object.entries(window.HOLDINGS_DATA).forEach(([nm,d])=>{
+    if(d && !d.error && d.last!=null) opts += `<option value="${nm}">${nm} (현재가 ${fmtNum(d.last)})</option>`;
+  });
+  h += `<div class="section-label" id="sec-check">손절 · 익절 점검</div>
+  <div class="legend">📌 보유 종목을 고르고 <b>평단·손절가·목표가</b>를 넣으면 현재 손익과 손절·익절까지 거리를 계산합니다 · 입력값은 이 기기에만 저장 · <b>매매 지시가 아니라 본인이 정한 기준 도달 알림</b>입니다</div>
+  <div class="checker" data-fade>
+    <select id="ck-pick" onchange="pickHolding()">${opts}</select>
+    <div class="row">
+      <div><label>종목명</label><input id="ck-name" placeholder="예: 삼성전자"></div>
+      <div><label>현재가</label><input id="ck-now" type="number" inputmode="decimal" placeholder="336000"></div>
+    </div>
+    <div class="row">
+      <div><label>평단(매수가)</label><input id="ck-buy" type="number" inputmode="decimal" placeholder="311000"></div>
+      <div><label>손절가</label><input id="ck-stop" type="number" inputmode="decimal" placeholder="280000"></div>
+    </div>
+    <div class="row">
+      <div><label>목표가</label><input id="ck-target" type="number" inputmode="decimal" placeholder="380000"></div>
+      <div><label>보유 수량 (포트폴리오 구성용)</label><input id="ck-qty" type="number" inputmode="decimal" placeholder="30"></div>
+    </div>
+    <button class="chk-btn" onclick="runChecker()">점검하기</button>
+    <div class="chk-out" id="ck-out"></div>
+  </div>`;
+
+  // ⑨-1 포트폴리오 구성 (수량 입력된 종목 집계)
+  h += `<div class="section-label" id="sec-pf">포트폴리오 구성 · 쏠림 점검</div>
+  <div class="legend">🧩 위 점검 도구에 <b>평단·수량</b>을 넣은 종목을 모아 <b>비중·섹터 쏠림·상위 집중도</b>를 계산합니다 · 해외 종목은 원/달러 환율로 환산 · 이 기기에만 저장</div>
+  <div class="pf-wrap" data-fade id="pf-wrap" style="display:none">
+    <div class="pf-grid">
+      <div class="chartbox" style="margin:0"><canvas id="pf-donut"></canvas></div>
+      <div class="pf-cells" id="pf-cells"></div>
+    </div>
+    <div class="pf-note" id="pf-note"></div>
+  </div>
+  <div class="card" data-fade id="pf-empty"><p style="font-size:13.5px;color:var(--dim)">아직 수량이 입력된 종목이 없습니다. 위 점검 도구에서 종목을 고르고 <b>평단과 수량</b>을 넣어 '점검하기'를 누르면 여기에 자동으로 집계됩니다.</p></div>`;
+
+
   // ② 주요 이슈
   if(b.key_issues?.length){
     h += `<div class="section-label">주요 이슈</div><ul class="issues" data-fade>`;
@@ -432,15 +551,16 @@ async function load(){
   // ②-1 최신 뉴스 (주요 이슈 아래)
   const nw = data.news||{};
   if(Object.keys(nw).length){
-    h += `<div class="section-label">최신 뉴스</div><div class="grid" style="gap:18px">`;
+    let nwh = `<div class="grid" style="gap:18px">`;
     for(const cat in nw){
-      h += `<div class="card" data-fade><h3>📰 ${cat}</h3><ul style="list-style:none;display:grid;gap:8px;margin-top:4px">`;
+      nwh += `<div class="card"><h3>📰 ${cat}</h3><ul style="list-style:none;display:grid;gap:8px;margin-top:4px">`;
       nw[cat].forEach(n=>{
-        h += `<li style="font-size:13.5px;color:#c8d0dc;line-height:1.5">${n.title}</li>`;
+        nwh += `<li style="font-size:13.5px;color:#c8d0dc;line-height:1.5">${n.title}</li>`;
       });
-      h += `</ul></div>`;
+      nwh += `</ul></div>`;
     }
-    h += `</div>`;
+    nwh += `</div>`;
+    h += `<details class="fold" id="sec-news" data-fade><summary>📰 최신 뉴스 <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${nwh}</div></details>`;
   }
 
   // ③ 변동성 시나리오
@@ -480,114 +600,55 @@ async function load(){
     h += `<div class="vol" data-fade style="margin-top:14px;background:linear-gradient(135deg,var(--panel),#171019)"><div class="lab">🗣 뉴스·여론 심리</div><p>${b.sentiment}</p></div>`;
   }
 
-  // ⑥ 시황 게이트
-  if(b.market_gate){
-    h += `<div class="gate" data-fade><div class="lab">🚦 시황 게이트 (시장 전체 환경)</div><p>${b.market_gate}</p></div>`;
-  }
-
-  // ⑦ 내 보유 종목 (차수재시실)
-  if(b.holdings_scores?.length){
-    const hd = data.holdings||{};
-    h += `<div class="section-label">내 보유 종목</div>` + scoreLegend + `<div class="grid" style="gap:12px">`;
-    b.holdings_scores.forEach(p=>{ h+=renderScoreCard(p, hd[p.name]); });
-    h += `</div>`;
-  }
-
-  // ⑦-1 관심 종목 (미보유 · 점검 중)
-  if(b.watchlist_scores?.length){
-    const wd = data.watchlist_stocks||{};
-    h += `<div class="section-label">관심 종목 · 미보유 점검</div>`;
-    h += `<div class="legend">👀 아직 보유하지 않은 <b>점검 중 종목</b> · 실제 매수하면 보유 종목으로 옮겨 관리하세요 (코드의 HOLDINGS에 추가)</div>`;
-    h += `<div class="grid" style="gap:12px">`;
-    b.watchlist_scores.forEach(p=>{ h+=renderScoreCard(p, wd[p.name]); });
-    h += `</div>`;
-  }
-
   // ⑧ 특징주 (차수재시실) + 레이더
   if(b.stock_scores?.length){
     const fdate = (data.featured&&data.featured.date)||"";
-    h += `<div class="section-label">특징주 채점${fdate?` (${fdate})`:""}</div>` + scoreLegend + `<div class="grid" style="gap:12px">`;
-    b.stock_scores.forEach(p=>{ h+=renderScoreCard(p); });
-    h+=`</div>`;
+    let fh = scoreLegend + `<div class="grid" style="gap:12px">`;
+    b.stock_scores.forEach(p=>{ fh+=renderScoreCard(p); });
+    fh+=`</div>`;
     if(b.stock_scores.length>=2){
-      h+=`<div class="section-label">종목 비교 (5축 레이더)</div><div class="chartbox" data-fade><canvas id="radar"></canvas></div>`;
+      fh+=`<div class="section-label">종목 비교 (5축 레이더)</div><div class="chartbox"><canvas id="radar"></canvas></div>`;
     }
+    h += `<details class="fold" id="fold-feat" data-fade><summary>⭐ 특징주 채점${fdate?` (${fdate})`:""} <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${fh}</div></details>`;
   } else if(data.featured && data.featured.error){
     h += `<div class="section-label">특징주</div><div class="card" data-fade><p class="err" style="font-size:13px">KRX 데이터 일시 불가 — 뉴스 기반 분석으로 대체되었습니다.</p></div>`;
   }
 
-  // ⑨ 진입가 점검 (보유 종목 선택 시 현재가 자동 채움)
-  window.HOLDINGS_DATA = {...(data.holdings||{}), ...(data.watchlist_stocks||{})};
-  window.FX_KRW = (m["원/달러"]&&m["원/달러"].last)||1380;
-  let opts = `<option value="">— 보유 종목 선택 또는 직접 입력 —</option>`;
-  Object.entries(window.HOLDINGS_DATA).forEach(([nm,d])=>{
-    if(d && !d.error && d.last!=null) opts += `<option value="${nm}">${nm} (현재가 ${fmtNum(d.last)})</option>`;
-  });
-  h += `<div class="section-label">손절 · 익절 점검</div>
-  <div class="legend">📌 보유 종목을 고르고 <b>평단·손절가·목표가</b>를 넣으면 현재 손익과 손절·익절까지 거리를 계산합니다 · 입력값은 이 기기에만 저장 · <b>매매 지시가 아니라 본인이 정한 기준 도달 알림</b>입니다</div>
-  <div class="checker" data-fade>
-    <select id="ck-pick" onchange="pickHolding()">${opts}</select>
-    <div class="row">
-      <div><label>종목명</label><input id="ck-name" placeholder="예: 삼성전자"></div>
-      <div><label>현재가</label><input id="ck-now" type="number" inputmode="decimal" placeholder="336000"></div>
-    </div>
-    <div class="row">
-      <div><label>평단(매수가)</label><input id="ck-buy" type="number" inputmode="decimal" placeholder="311000"></div>
-      <div><label>손절가</label><input id="ck-stop" type="number" inputmode="decimal" placeholder="280000"></div>
-    </div>
-    <div class="row">
-      <div><label>목표가</label><input id="ck-target" type="number" inputmode="decimal" placeholder="380000"></div>
-      <div><label>보유 수량 (포트폴리오 구성용)</label><input id="ck-qty" type="number" inputmode="decimal" placeholder="30"></div>
-    </div>
-    <button class="chk-btn" onclick="runChecker()">점검하기</button>
-    <div class="chk-out" id="ck-out"></div>
-  </div>`;
-
-  // ⑨-1 포트폴리오 구성 (수량 입력된 종목 집계)
-  h += `<div class="section-label">포트폴리오 구성 · 쏠림 점검</div>
-  <div class="legend">🧩 위 점검 도구에 <b>평단·수량</b>을 넣은 종목을 모아 <b>비중·섹터 쏠림·상위 집중도</b>를 계산합니다 · 해외 종목은 원/달러 환율로 환산 · 이 기기에만 저장</div>
-  <div class="pf-wrap" data-fade id="pf-wrap" style="display:none">
-    <div class="pf-grid">
-      <div class="chartbox" style="margin:0"><canvas id="pf-donut"></canvas></div>
-      <div class="pf-cells" id="pf-cells"></div>
-    </div>
-    <div class="pf-note" id="pf-note"></div>
-  </div>
-  <div class="card" data-fade id="pf-empty"><p style="font-size:13.5px;color:var(--dim)">아직 수량이 입력된 종목이 없습니다. 위 점검 도구에서 종목을 고르고 <b>평단과 수량</b>을 넣어 '점검하기'를 누르면 여기에 자동으로 집계됩니다.</p></div>`;
-
   // ⑩ 실시간 지표 + 차트 + ETF
-  h += `<div class="section-label">실시간 지표</div>` + renderQuotes(idx);
+  h += `<div class="section-label" id="sec-quotes">실시간 지표</div>` + renderQuotes(idx);
   h += `<div class="section-label">등락률 비교</div>
   <div class="chart-legend"><span><i style="background:#4a90d9"></i>한국</span><span><i style="background:#9b6dff"></i>미국</span><span><i style="background:#d4a72c"></i>금</span><span><i style="background:#7a8694"></i>환율·금리·변동성</span></div>
   <div class="chartbox" data-fade><canvas id="chg"></canvas></div>`;
-  if(etf.length) h += `<div class="section-label">ETF</div>` + renderQuotes(etf);
+  if(etf.length) h += `<details class="fold" data-fade><summary>📦 ETF 시세 <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${renderQuotes(etf)}</div></details>`;
 
   // ⑪ 관찰 트리거
   if(b.triggers?.length){
     const tic = s => /✅/.test(s)?"✅":/⚠️/.test(s)?"⚠️":/❌/.test(s)?"❌":"❓";
     const allMet = b.triggers.every(t=>/✅/.test(t.status||""));
-    h += `<div class="section-label">관찰 트리거 · 전환 확인</div><div class="trig">`;
+    let th = `<div class="trig">`;
     b.triggers.forEach(t=>{
-      h+=`<div class="trig-row" data-fade>
+      th+=`<div class="trig-row">
         <span class="trig-ic">${tic(t.status||"❓")}</span>
         <div class="trig-body"><div class="trig-cond">${t.cond||""}</div>
         ${t.note?`<div class="trig-note">${t.note}</div>`:""}</div>
       </div>`;
     });
-    h+=`</div>`;
-    if(allMet) h+=`<div class="trig-all">✅ 모든 트리거 충족 — 전환 초입 신호</div>`;
+    th+=`</div>`;
+    if(allMet) th+=`<div class="trig-all">✅ 모든 트리거 충족 — 전환 초입 신호</div>`;
+    h += `<details class="fold" data-fade${allMet?" open":""}><summary>🔭 관찰 트리거 · 전환 확인 <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${th}</div></details>`;
   }
 
   // ⑫ 워치리스트
   if(b.watchlist?.length){
-    h += `<div class="section-label">주목 종목·섹터</div><ul class="issues" data-fade>`;
-    b.watchlist.forEach(i=>h+=`<li>${i}</li>`);
-    h += `</ul>`;
+    let wh = `<ul class="issues">`;
+    b.watchlist.forEach(i=>wh+=`<li>${i}</li>`);
+    wh += `</ul>`;
+    h += `<details class="fold" data-fade><summary>👁 주목 종목·섹터 <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${wh}</div></details>`;
   }
 
   // ⑫-1 테마 연결 · 수혜주 발굴
   if(b.theme_plays?.length){
-    h += `<div class="section-label">테마 연결 · 수혜주 발굴</div>`;
+    h += `<div class="section-label" id="sec-theme">테마 연결 · 수혜주 발굴</div>`;
     h += `<div class="legend">🔗 오늘 호재에서 포착한 테마의 <b>밸류체인 수혜 종목을 순위로</b> 제시 · 5축 채점과 비교 근거 포함 · <b>매수 시점·진입 권고가 아니며</b> 후보 점검은 진입가 도구로</div>`;
     b.theme_plays.forEach(t=>{
       h += `<div class="theme-card" data-fade>
@@ -664,7 +725,9 @@ async function load(){
            grid:{color:"#1f2733"}}}}
   });
 
-  // 차수재시실 레이더
+  // 차수재시실 레이더 (특징주 펼칠 때 렌더)
+  const featFold = document.getElementById("fold-feat");
+  const drawRadar = () => {
   if(b.stock_scores && b.stock_scores.length>=2 && document.getElementById("radar")){
     const axes=["차","수","재","시","실"];
     const palette=[
@@ -691,6 +754,8 @@ async function load(){
       }
     });
   }
+  };
+  if(featFold) featFold.addEventListener("toggle", ()=>{ if(featFold.open) drawRadar(); }, {once:true});
 }
 load();
 
