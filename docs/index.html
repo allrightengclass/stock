@@ -526,7 +526,23 @@ async function load(){
     </div>
     <div class="pf-note" id="pf-note"></div>
   </div>
-  <div class="card" data-fade id="pf-empty"><p style="font-size:13.5px;color:var(--dim)">아직 수량이 입력된 종목이 없습니다. 위 점검 도구에서 종목을 고르고 <b>평단과 수량</b>을 넣어 '점검하기'를 누르면 여기에 자동으로 집계됩니다.</p></div>`;
+  <div class="card" data-fade id="pf-empty"><p style="font-size:13.5px;color:var(--dim)">아직 수량이 입력된 종목이 없습니다. 위 점검 도구에서 종목을 고르고 <b>평단과 수량</b>을 넣어 '점검하기'를 누르면 여기에 자동으로 집계됩니다.</p></div>
+
+  <details class="fold" data-fade style="margin-top:14px">
+    <summary>💾 기기 간 옮기기 (내보내기 / 가져오기) <span class="fold-hint">탭해서 펼치기</span></summary>
+    <div class="fold-body">
+      <p style="font-size:13px;color:var(--dim);line-height:1.6;margin-bottom:12px">
+        입력한 <b>평단·수량·손절가·목표가</b>는 이 기기에만 저장됩니다. 다른 기기(폰↔컴퓨터↔태블릿)로 옮기려면:
+        ① 여기서 <b>내보내기</b> → 코드 복사 → 카톡 '나에게 보내기' 등으로 전달
+        ② 다른 기기에서 대시보드 열고 그 코드를 붙여넣고 <b>가져오기</b></p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+        <button class="chk-btn" style="margin:0" onclick="exportCk()">📤 내보내기 (코드 복사)</button>
+        <button class="chk-btn" style="margin:0;background:#26d07c" onclick="importCk()">📥 가져오기 (아래 코드 적용)</button>
+      </div>
+      <textarea id="ck-io" placeholder="내보내기를 누르면 여기에 코드가 생성됩니다. 가져올 땐 받은 코드를 여기 붙여넣고 '가져오기'를 누르세요." style="width:100%;min-height:88px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px 13px;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:11.5px;outline:none;resize:vertical"></textarea>
+      <div id="ck-io-msg" style="font-size:12.5px;margin-top:8px;color:var(--dim)"></div>
+    </div>
+  </details>`;
 
 
   h += `<div class="bigdiv" data-fade>🌐 시장 상세</div>`;
@@ -912,6 +928,46 @@ function renderPortfolio(){
   });
 }
 window.renderPortfolio=renderPortfolio;
+
+// ── 기기 간 이동 (내보내기/가져오기) ─────────────────────
+function exportCk(){
+  const out={};
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.startsWith("ck_")) out[k]=JSON.parse(localStorage.getItem(k)||"{}");
+    }
+  }catch(e){}
+  const msg=document.getElementById("ck-io-msg");
+  if(!Object.keys(out).length){ msg.textContent="내보낼 데이터가 없습니다. 먼저 종목을 입력하세요."; return; }
+  const code="STOCKKIT1:"+btoa(unescape(encodeURIComponent(JSON.stringify(out))));
+  const ta=document.getElementById("ck-io");
+  ta.value=code; ta.select();
+  try{ document.execCommand("copy"); }catch(e){}
+  if(navigator.clipboard) navigator.clipboard.writeText(code).catch(()=>{});
+  msg.innerHTML=`✅ <b>${Object.keys(out).length}개 종목</b> 내보내기 완료 — 코드가 복사됐습니다. 카톡 '나에게 보내기' 등으로 다른 기기에 전달하세요.`;
+}
+window.exportCk=exportCk;
+
+function importCk(){
+  const ta=document.getElementById("ck-io");
+  const msg=document.getElementById("ck-io-msg");
+  let code=(ta.value||"").trim();
+  if(!code){ msg.textContent="붙여넣은 코드가 없습니다."; return; }
+  if(!code.startsWith("STOCKKIT1:")){ msg.textContent="⚠ 올바른 코드가 아닙니다. '내보내기'로 생성된 코드를 그대로 붙여넣으세요."; return; }
+  try{
+    const obj=JSON.parse(decodeURIComponent(escape(atob(code.slice(10)))));
+    let n=0;
+    for(const k in obj){
+      if(k.startsWith("ck_")&&obj[k]&&typeof obj[k]==="object"){
+        localStorage.setItem(k,JSON.stringify(obj[k])); n++;
+      }
+    }
+    msg.innerHTML=`✅ <b>${n}개 종목</b>을 이 기기로 가져왔습니다.`;
+    if(window.renderPortfolio) renderPortfolio();
+  }catch(e){ msg.textContent="⚠ 코드 해석 실패 — 코드가 잘렸거나 손상됐습니다. 전체를 다시 복사해 붙여넣으세요."; }
+}
+window.importCk=importCk;
 </script>
 </body>
 </html>
