@@ -260,6 +260,21 @@
   .fold[open] summary{border-bottom:1px solid var(--line)}
   .fold[open] .fold-hint{display:none}
   .fold-body{padding:15px 16px 17px}
+  /* 손절 경고 배너 */
+  .sa{border-radius:12px;padding:13px 16px;margin:0 0 12px;border:1px solid}
+  .sa-t{font-size:13px;font-weight:700;margin-bottom:7px}
+  .sa-row{font-size:13px;line-height:1.55;font-family:'IBM Plex Mono',monospace}
+  .sa-row b{font-family:Pretendard}
+  .sa-hit{background:rgba(255,90,110,.13);border-color:rgba(255,90,110,.4)}
+  .sa-hit .sa-t{color:#ff8a96}.sa-hit .sa-row{color:#f0d4d7}
+  .sa-near{background:rgba(231,193,78,.1);border-color:rgba(231,193,78,.35)}
+  .sa-near .sa-t{color:#e7c14e}.sa-near .sa-row{color:#e8e0cf}
+  .sa-take{background:rgba(38,208,124,.1);border-color:rgba(38,208,124,.3)}
+  .sa-take .sa-t{color:#4fe0a0}.sa-take .sa-row{color:#cfeede}
+  /* 매수 근거 */
+  .mywhy{font-size:12.5px;color:#bcd4f0;background:rgba(110,168,255,.08);
+    border:1px solid rgba(110,168,255,.22);border-radius:8px;padding:8px 11px;margin-bottom:10px;line-height:1.5}
+  .mywhy i{color:var(--faint);font-style:normal}
   /* 블록 구분 라벨 */
   .bigdiv{margin:44px 0 6px;padding:13px 16px;border-radius:12px;
     background:linear-gradient(135deg,#162132,#101623);border:1px solid #2a3a55;
@@ -457,16 +472,27 @@ async function load(){
     h += `</div></div>`;
   }
 
+  // 손절·익절 도달 경고 (자동)
+  h += `<div id="stop-alerts"></div>`;
+
   // ⑥ 시황 게이트 (앞으로 이동)
   if(b.market_gate){
     h += `<div class="gate" data-fade><div class="lab">🚦 시황 게이트 (시장 전체 환경)</div><p>${b.market_gate}</p></div>`;
   }
 
+  // 매수 근거 표시 헬퍼
+  const myWhy = nm => {
+    try{ const s=JSON.parse(localStorage.getItem("ck_"+nm)||"{}");
+      if(s.why) return `<div class="mywhy">📝 내 매수 근거: ${s.why} <i>— 아직 유효한가요?</i></div>`;
+    }catch(e){}
+    return "";
+  };
+
   // 접이식 종목 행 렌더러 (B)
   const renderCompactCard = (p, meta) => `<details class="stk" data-fade>
     <summary><span class="stk-sig">${signal(p.grade||"")}</span><span class="stk-nm">${p.name}</span>
       <span class="grade ${gradeClass(p.grade||"")}">${p.grade||""}</span><span class="stk-arrow">▾</span></summary>
-    <div class="stk-body">${earningsBadge(meta)}<div class="gauges">${gaugeHtml(p.scores)}</div>
+    <div class="stk-body">${earningsBadge(meta)}${myWhy(p.name)}<div class="gauges">${gaugeHtml(p.scores)}</div>
       <p>${p.comment||""}</p>${p.caution?`<div class="caution">⚠ ${p.caution}</div>`:""}</div>
   </details>`;
 
@@ -512,6 +538,8 @@ async function load(){
       <div><label>목표가</label><input id="ck-target" type="number" inputmode="decimal" placeholder="380000"></div>
       <div><label>보유 수량 (포트폴리오 구성용)</label><input id="ck-qty" type="number" inputmode="decimal" placeholder="30"></div>
     </div>
+    <div style="margin-bottom:10px"><label style="display:block;font-size:11px;color:var(--dim);margin-bottom:5px">📝 매수 근거 — 왜 샀는지 한 줄 (못 쓰겠으면 사면 안 되는 종목입니다)</label>
+      <input id="ck-why" placeholder="예: AI 수요로 클라우드 성장 지속 전망" style="width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;color:var(--ink);font-family:Pretendard;font-size:13.5px;outline:none"></div>
     <button class="chk-btn" onclick="runChecker()">점검하기</button>
     <div class="chk-out" id="ck-out"></div>
   </div>`;
@@ -541,6 +569,23 @@ async function load(){
       </div>
       <textarea id="ck-io" placeholder="내보내기를 누르면 여기에 코드가 생성됩니다. 가져올 땐 받은 코드를 여기 붙여넣고 '가져오기'를 누르세요." style="width:100%;min-height:88px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px 13px;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:11.5px;outline:none;resize:vertical"></textarea>
       <div id="ck-io-msg" style="font-size:12.5px;margin-top:8px;color:var(--dim)"></div>
+    </div>
+  </details>
+
+  <details class="fold" data-fade style="margin-top:14px">
+    <summary>💰 해외주식 양도세 공제 여유 <span class="fold-hint">탭해서 펼치기</span></summary>
+    <div class="fold-body">
+      <p style="font-size:13px;color:var(--dim);line-height:1.6;margin-bottom:12px">
+        해외주식 양도소득은 연 <b>250만원까지 비과세</b>(기본공제)입니다. 증권앱의 '해외주식 양도세 조회'에서
+        올해 <b>양도소득 금액</b>을 확인해 아래에 넣으면 남은 여유를 계산합니다.
+        <b>이익 종목 매도 전</b> 여유를 확인하고, 손실 종목을 같은 해에 팔면 이익과 상계돼 세금이 줄어듭니다.</p>
+      <div class="row" style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:10px">
+        <input id="tax-realized" type="number" inputmode="numeric" placeholder="올해 양도소득 (예: 2452982)"
+          style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:14px;outline:none">
+        <button class="chk-btn" style="margin:0;width:auto;padding:10px 18px" onclick="saveTax()">저장</button>
+      </div>
+      <div id="tax-out" style="font-size:13.5px;line-height:1.6"></div>
+      <div style="font-size:11.5px;color:var(--faint);margin-top:10px">※ 참고용 계산이며 세무 자문이 아닙니다. 실제 신고·공제율은 세무사 또는 홈택스에서 확인하세요.</div>
     </div>
   </details>`;
 
@@ -699,6 +744,9 @@ async function load(){
   // 페이드 스태거
   document.querySelectorAll("[data-fade]").forEach((el,i)=>el.style.animationDelay=(i*40)+"ms");
   if(window.renderPortfolio) renderPortfolio();
+  if(window.renderStopAlerts) renderStopAlerts();
+  try{ const tv=localStorage.getItem("tax_realized"); if(tv!=null){ const el=document.getElementById("tax-realized"); if(el) el.value=tv; } }catch(e){}
+  if(window.drawTax) drawTax();
 
   // 주간 흐름 차트 렌더 (라인=종가, 막대=등락률)
   wkKeys.forEach((k,i)=>{
@@ -799,6 +847,7 @@ function pickHolding(){
     document.getElementById("ck-stop").value=saved.stop||"";
     document.getElementById("ck-target").value=saved.target||"";
     document.getElementById("ck-qty").value=saved.qty||"";
+    document.getElementById("ck-why").value=saved.why||"";
   }catch(e){}
   document.getElementById("ck-buy").focus();
 }
@@ -817,8 +866,10 @@ function runChecker(){
 
   // 저장 (이 기기 한정)
   const qty=parseFloat(document.getElementById("ck-qty").value)||null;
-  try{ localStorage.setItem("ck_"+name, JSON.stringify({buy,stop,target,qty})); }catch(e){}
+  const why=(document.getElementById("ck-why").value||"").trim()||null;
+  try{ localStorage.setItem("ck_"+name, JSON.stringify({buy,stop,target,qty,why})); }catch(e){}
   if(window.renderPortfolio) renderPortfolio();
+  if(window.renderStopAlerts) renderStopAlerts();
 
   // 손절가 미입력 시 평단 −10% 예시
   const stopUsed = stop || Math.round(buy*0.90);
@@ -968,6 +1019,76 @@ function importCk(){
   }catch(e){ msg.textContent="⚠ 코드 해석 실패 — 코드가 잘렸거나 손상됐습니다. 전체를 다시 복사해 붙여넣으세요."; }
 }
 window.importCk=importCk;
+
+// ── 손절·익절 도달 자동 경고 ─────────────────────────────
+function renderStopAlerts(){
+  const box=document.getElementById("stop-alerts");
+  if(!box) return;
+  const hits=[], near=[], takes=[];
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(!k||!k.startsWith("ck_")) continue;
+      const name=k.slice(3);
+      let s; try{ s=JSON.parse(localStorage.getItem(k)||"{}"); }catch(e){ continue; }
+      const d=(window.HOLDINGS_DATA||{})[name];
+      if(!d||d.last==null) continue;
+      const now=d.last;
+      if(s.stop){
+        if(now<=s.stop) hits.push({name,now,stop:s.stop});
+        else{
+          const dist=(now-s.stop)/now*100;
+          if(dist<=3) near.push({name,now,stop:s.stop,dist});
+        }
+      }
+      if(s.target && now>=s.target) takes.push({name,now,target:s.target});
+    }
+  }catch(e){}
+  if(!hits.length&&!near.length&&!takes.length){ box.innerHTML=""; return; }
+  let s="";
+  if(hits.length){
+    s+=`<div class="sa sa-hit"><div class="sa-t">🔴 손절 기준 도달 — 방치하지 말고 오늘 결정하세요</div>`;
+    hits.forEach(x=>{ s+=`<div class="sa-row"><b>${x.name}</b> 현재 ${fmtNum(x.now)} ≤ 손절선 ${fmtNum(x.stop)} · 본인 원칙대로 정리 여부 점검</div>`; });
+    s+=`</div>`;
+  }
+  if(near.length){
+    s+=`<div class="sa sa-near"><div class="sa-t">🟠 손절선 근접 (3% 이내)</div>`;
+    near.forEach(x=>{ s+=`<div class="sa-row"><b>${x.name}</b> 손절선까지 -${x.dist.toFixed(1)}% (현재 ${fmtNum(x.now)} / 손절 ${fmtNum(x.stop)})</div>`; });
+    s+=`</div>`;
+  }
+  if(takes.length){
+    s+=`<div class="sa sa-take"><div class="sa-t">🟢 익절 목표 도달</div>`;
+    takes.forEach(x=>{ s+=`<div class="sa-row"><b>${x.name}</b> 현재 ${fmtNum(x.now)} ≥ 목표 ${fmtNum(x.target)} · 분할 익절 점검 구간</div>`; });
+    s+=`</div>`;
+  }
+  box.innerHTML=s;
+}
+window.renderStopAlerts=renderStopAlerts;
+
+// ── 해외 양도세 공제 트래커 ──────────────────────────────
+function drawTax(){
+  const out=document.getElementById("tax-out");
+  if(!out) return;
+  let v=null;
+  try{ v=parseFloat(localStorage.getItem("tax_realized")); }catch(e){}
+  if(v==null||isNaN(v)){ out.innerHTML=`<span style="color:var(--faint)">아직 입력된 값이 없습니다.</span>`; return; }
+  const LIMIT=2500000, remain=LIMIT-v, pct=Math.min(100,Math.max(0,v/LIMIT*100));
+  const barC = remain<0?"#ff5a6e":pct>85?"#e7c14e":"#26d07c";
+  out.innerHTML=`
+    <div style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;height:14px;overflow:hidden;margin-bottom:8px">
+      <div style="width:${pct}%;height:100%;background:${barC}"></div></div>
+    올해 양도소득 <b class="mono">${v.toLocaleString()}원</b> / 공제 250만원<br>` +
+    (remain>=0
+      ? `→ <b style="color:${barC}">${remain.toLocaleString()}원</b> 어치 이익까지 세금 0원. 이익 실현 계획 시 이 여유 안에서, 초과 예상 시 손실 종목과 같은 해에 상계하세요.`
+      : `→ 한도 <b style="color:#ff5a6e">${Math.abs(remain).toLocaleString()}원 초과</b> — 초과분의 22%가 양도세 대상입니다. 손실 종목 매도로 상계 가능한지 검토하세요.`);
+}
+function saveTax(){
+  const v=parseFloat(document.getElementById("tax-realized").value);
+  if(isNaN(v)){ document.getElementById("tax-out").innerHTML=`<span style="color:#ff8a96">숫자를 입력하세요.</span>`; return; }
+  try{ localStorage.setItem("tax_realized", String(v)); }catch(e){}
+  drawTax();
+}
+window.saveTax=saveTax; window.drawTax=drawTax;
 </script>
 </body>
 </html>
