@@ -275,6 +275,19 @@
   .mywhy{font-size:12.5px;color:#bcd4f0;background:rgba(110,168,255,.08);
     border:1px solid rgba(110,168,255,.22);border-radius:8px;padding:8px 11px;margin-bottom:10px;line-height:1.5}
   .mywhy i{color:var(--faint);font-style:normal}
+  /* 시나리오 대응 선택 */
+  .plan-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:11px}
+  .act{font-size:12px;font-weight:600;padding:7px 12px;border-radius:999px;cursor:pointer;
+    background:var(--panel2);color:var(--dim);border:1px solid var(--line);transition:all .15s}
+  .act-def{border-color:rgba(74,144,217,.45);color:#7fb3e8}
+  .act-def.sel{background:#4a90d9;color:#0b0e14;border-color:#4a90d9}
+  .act-neu.sel{background:#8a97a8;color:#0b0e14;border-color:#8a97a8}
+  .act-off{border-color:rgba(255,90,110,.45);color:#ff8a96}
+  .act-off.sel{background:#ff5a6e;color:#0b0e14;border-color:#ff5a6e}
+  .act-cus{border-style:dashed}
+  .act-cus.sel{background:var(--accent);color:#0b0e14;border-color:var(--accent);border-style:solid}
+  .plan-mine{margin-top:9px;font-size:12.5px;color:#bcd4f0;background:rgba(110,168,255,.08);
+    border:1px solid rgba(110,168,255,.22);border-radius:8px;padding:7px 11px}
   /* 블록 구분 라벨 */
   .bigdiv{margin:44px 0 6px;padding:13px 16px;border-radius:12px;
     background:linear-gradient(135deg,#162132,#101623);border:1px solid #2a3a55;
@@ -624,11 +637,23 @@ async function load(){
 
   // ③ 변동성 시나리오
   if(b.scenarios?.length){
-    h += `<div class="section-label">변동성 시나리오 (상승·횡보·하락)</div><div class="scen">`;
-    b.scenarios.forEach(s=>{
+    h += `<div class="section-label">변동성 시나리오 (상승·횡보·하락)</div>
+    <div class="legend">🧭 각 시나리오 아래에서 <b>나의 대응을 미리 선택</b>해두세요 — 시장이 움직일 때 감정이 아니라 계획이 결정하게 됩니다 · 선택은 이 기기에 저장</div>
+    <div class="scen">`;
+    b.scenarios.forEach((s,si)=>{
+      const key=(s.name||"").replace(/\s/g,"");
+      let saved=null; try{ saved=JSON.parse(localStorage.getItem("plan_"+key)||"null"); }catch(e){}
+      let acts=`<div class="plan-row" data-key="${key}">`;
+      (s.actions||[]).forEach(a=>{
+        const ty=a.type==="offense"?"act-off":a.type==="defense"?"act-def":"act-neu";
+        const sel=saved&&saved.label===a.label?" sel":"";
+        acts+=`<button class="act ${ty}${sel}" onclick="pickPlan('${key}',this)">${a.label}</button>`;
+      });
+      acts+=`<button class="act act-cus${saved&&saved.custom?" sel":""}" onclick="customPlan('${key}',this)">${saved&&saved.custom?saved.label:"✏️ 직접 입력"}</button></div>`;
+      const mine=saved?`<div class="plan-mine" id="pm_${key}">📍 나의 대응: <b>${saved.label}</b></div>`:`<div class="plan-mine" id="pm_${key}" style="display:none"></div>`;
       h+=`<div class="sc" data-fade><span class="bar"></span>
         <div class="t">${s.name}</div><div class="pr">${s.prob||""}</div>
-        <div class="d">${s.desc||""}</div></div>`;
+        <div class="d">${s.desc||""}</div>${acts}${mine}</div>`;
     });
     h += `</div>`;
   }
@@ -1089,6 +1114,34 @@ function saveTax(){
   drawTax();
 }
 window.saveTax=saveTax; window.drawTax=drawTax;
+
+// ── 시나리오 나의 대응 선택 ──────────────────────────────
+function _setPlan(key, label, custom, btn){
+  const row=btn.closest(".plan-row");
+  const was=btn.classList.contains("sel");
+  row.querySelectorAll(".act").forEach(b=>b.classList.remove("sel"));
+  const pm=document.getElementById("pm_"+key);
+  if(was){ // 재클릭 = 해제
+    try{ localStorage.removeItem("plan_"+key); }catch(e){}
+    if(pm){ pm.style.display="none"; pm.innerHTML=""; }
+    return;
+  }
+  btn.classList.add("sel");
+  try{ localStorage.setItem("plan_"+key, JSON.stringify({label, custom:!!custom, ts:Date.now()})); }catch(e){}
+  if(pm){ pm.style.display=""; pm.innerHTML=`📍 나의 대응: <b>${label}</b>`; }
+}
+function pickPlan(key, btn){ _setPlan(key, btn.textContent, false, btn); }
+function customPlan(key, btn){
+  const cur=(btn.classList.contains("sel")&&btn.textContent!=="✏️ 직접 입력")?btn.textContent:"";
+  const v=prompt("이 시나리오에서 나의 대응을 직접 적어주세요 (예: TQQQ 절반 정리)", cur);
+  if(v===null) return;
+  const label=v.trim();
+  if(!label){ _setPlan(key, "", false, btn); btn.textContent="✏️ 직접 입력"; return; }
+  btn.textContent=label;
+  btn.classList.remove("sel"); // _setPlan이 토글로 처리하지 않도록
+  _setPlan(key, label, true, btn);
+}
+window.pickPlan=pickPlan; window.customPlan=customPlan;
 </script>
 </body>
 </html>
