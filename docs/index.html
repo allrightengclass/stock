@@ -288,6 +288,9 @@
   .act-cus.sel{background:var(--accent);color:#0b0e14;border-color:var(--accent);border-style:solid}
   .plan-mine{margin-top:9px;font-size:12.5px;color:#bcd4f0;background:rgba(110,168,255,.08);
     border:1px solid rgba(110,168,255,.22);border-radius:8px;padding:7px 11px}
+  .stale{background:rgba(231,193,78,.1);border:1px solid rgba(231,193,78,.35);color:#e8e0cf;
+    border-radius:12px;padding:12px 15px;margin:0 0 14px;font-size:13px;line-height:1.55}
+  .stale b{color:#e7c14e}
   /* 블록 구분 라벨 */
   .bigdiv{margin:44px 0 6px;padding:13px 16px;border-radius:12px;
     background:linear-gradient(135deg,#162132,#101623);border:1px solid #2a3a55;
@@ -413,7 +416,7 @@ async function load(){
       s += `<span class="${cls}">📅 ${lab}</span>`;
     }
     if(d.rev_qoq_pct!=null){
-      s += `<span class="earn-rev ${d.rev_qoq_pct>=0?"er-up":"er-down"}">최근 매출 ${d.rev_qoq_pct>=0?"+":""}${d.rev_qoq_pct}%</span>`;
+      s += `<span class="earn-rev ${d.rev_qoq_pct>=0?"er-up":"er-down"}">매출 전분기比 ${d.rev_qoq_pct>=0?"+":""}${d.rev_qoq_pct}%</span>`;
     }
     return s ? `<div class="earn-row">${s}</div>` : "";
   };
@@ -449,6 +452,15 @@ async function load(){
   const idx = all.filter(d=>(d.group||"지표")==="지표");
   const etf = all.filter(d=>d.group==="ETF");
 
+  // 분석 갱신 실패 안내 (직전 분석 유지 중)
+  if(b.stale_parts?.length){
+    const when = [...new Set([b.stale_parts.includes("시장 분석")?b.market_at:null,
+                              b.stale_parts.includes("종목 채점")?b.stocks_at:null].filter(Boolean))].join(", ");
+    h += `<div class="stale" data-fade>⏳ <b>${b.stale_parts.join("·")}</b> 갱신에 실패해 직전 분석을 보여주고 있습니다${when?` (${when} 작성)`:""}. 시세와 뉴스는 최신입니다.</div>`;
+  } else if(b.error && !b.us_summary){
+    h += `<div class="stale" data-fade>⏳ AI 분석을 불러오지 못했습니다. 시세와 뉴스만 표시합니다. 다음 자동 갱신 때 다시 시도합니다.</div>`;
+  }
+
   // ① 핵심 요약
   if(b.headline){
     const gate=b.market_gate||"";
@@ -480,7 +492,7 @@ async function load(){
   // A. 등급 변화 알림 (어제 대비)
   const gch = data.grade_changes||[];
   if(gch.length){
-    h += `<div class="gch" data-fade><div class="gch-t">🔔 어제와 달라진 종목</div><div class="gch-list">`;
+    h += `<div class="gch" data-fade><div class="gch-t">🔔 직전 갱신 이후 등급이 바뀐 종목</div><div class="gch-list">`;
     gch.forEach(c=>{ h+=`<span class="gch-item">${c.name} <b>${c.from}→${c.to}</b> <i>(${c.from_grade}→${c.to_grade})</i></span>`; });
     h += `</div></div>`;
   }

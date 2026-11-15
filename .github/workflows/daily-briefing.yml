@@ -1,20 +1,17 @@
 name: Daily Stock Briefing
-
 on:
   schedule:
-    - cron: "17 22 * * 1-5"
-    - cron: "17 12 * * 1-5"
+    - cron: "17 22 * * 0-5"   # 한국 월~토 07:17 (토요일은 미국 금요일 마감 반영)
+    - cron: "17 12 * * 1-5"   # 한국 월~금 21:17
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   briefing:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Install deps

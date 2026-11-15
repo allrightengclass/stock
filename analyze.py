@@ -9,6 +9,7 @@
 
 환경변수:
   GEMINI_API_KEY   (필수) Google AI Studio 무료 키
+  GEMINI_MODEL     (선택) 우선 사용할 모델명. 비우면 자동 선택
   TELEGRAM_TOKEN / TELEGRAM_CHAT_ID  (선택)
   SMTP_USER / SMTP_PASS / EMAIL_TO   (선택)
 """
@@ -110,7 +111,10 @@ NEWS_QUERIES = {
     "지정학·유가": "유가 OR 중동 OR 호르무즈 OR 이란 OR 지정학 증시",
 }
 
-GEMINI_MODEL = "gemini-2.5-flash"   # 현역 무료 모델 (필요시 gemini-2.5-flash-lite)
+# 우선 시도할 모델. 종료된 모델이면 자동으로 건너뛰고, 사용 가능한 최신 flash 모델을 찾아 씁니다.
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+GEMINI_FALLBACKS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+GEMINI_API = "https://generativelanguage.googleapis.com/v1beta"
 
 OUT_PATH = os.path.join(os.path.dirname(__file__), "docs", "data.json")
 
@@ -200,7 +204,7 @@ def fetch_earnings(symbol: str) -> dict:
             if ed is not None:
                 d = ed[0] if isinstance(ed, (list, tuple)) or hasattr(ed, "__len__") else ed
                 ds = str(d)[:10]
-                today = datetime.date.today()
+                today = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).date()
                 try:
                     edate = datetime.date.fromisoformat(ds)
                     dleft = (edate - today).days
@@ -252,37 +256,59 @@ def fetch_weekly(symbol: str, name: str) -> dict:
 
 
 import re as _re
+import html as _html
 
-def _article_text(url: str, limit: int = 700) -> str:
-    """기사 본문 발췌 (best-effort). 실패해도 빈 문자열 반환, 키트는 정상 동작."""
-    try:
-        hdr = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, timeout=8, headers=hdr, allow_redirects=True)
-        html = r.text
-        # 구글뉴스 중간 페이지면 실제 기사 링크 추출 후 1회 재시도
-        if "news.google.com" in r.url:
-            m = _re.search(r'href="(https?://(?!news\.google)[^"]+)"', html)
-            if m:
-                r = requests.get(m.group(1), timeout=8, headers=hdr, allow_redirects=True)
-                html = r.text
-        # script/style 제거 → 태그 제거 → 공백 정리
-        html = _re.sub(r"(?is)<(script|style|nav|header|footer|aside)[^>]*>.*?</\1>", " ", html)
-        txt = _re.sub(r"(?s)<[^>]+>", " ", html)
-        txt = _re.sub(r"\s+", " ", txt).strip()
-        if len(txt) < 200:
-            return ""
-        # 문장 단위 추출: '~다.' 경계로 분할해 25자 이상 문장만 (소수점·%는 보존)
-        parts = _re.split(r"(?<=다\.)\s+", txt)
-        sents = [p.strip() for p in parts if 25 <= len(p.strip()) <= 400 and p.strip().endswith("다.")]
-        body = " ".join(sents)[:limit]
-        return body if len(body) >= 100 else txt[:limit]
-    except Exception:
-        return ""
+# 본문 요약을 함께 주는 언론사 직접 RSS. 주소가 바뀌거나 막히면 그 피드만 조용히 건너뜁니다.
+EXTRA_FEEDS = {
+    "연합뉴스": "https://www.yna.co.kr/rss/economy.xml",
+    "매일경제": "https://www.mk.co.kr/rss/50200011/",
+    "한국경제": "https://www.hankyung.com/feed/finance",
+}
 
 
-def fetch_news(per_query: int = 5, body_per_query: int = 3) -> dict:
-    """카테고리별 헤드라인 + 상위 기사 본문 발췌.
-    본문은 수급 금액·연속 일수·괴리율 같은 '구체 수치'를 LLM에 공급하기 위함."""
+def _is_korean_text(s: str, min_ratio: float = 0.3) -> bool:
+    """깨진 바이트·이미지·영문 안내문이 본문으로 들어가는 것을 막는 검사."""
+    s = (s or "").strip()
+    if len(s) < 40:
+        return False
+    return len(_re.findall(r"[가-힣]", s)) / len(s) >= min_ratio
+
+
+def _strip_tags(s: str) -> str:
+    s = _re.sub(r"(?s)<[^>]+>", " ", _html.unescape(s or ""))
+    return _re.sub(r"\s+", " ", s).strip()
+
+
+def fetch_feed_briefs(per_feed: int = 6, limit: int = 400) -> list:
+    """언론사 RSS의 제목과 요약문. 수급 금액·연속 일수 같은 수치를 LLM에 공급한다."""
+    out = []
+    for src, url in EXTRA_FEEDS.items():
+        try:
+            r = requests.get(url, timeout=12, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code != 200:
+                print(f"feed 건너뜀 {src}: HTTP {r.status_code}")
+                continue
+            root = ET.fromstring(r.content)
+            n = 0
+            for it in root.findall(".//item"):
+                title = _strip_tags(it.findtext("title", ""))
+                desc = _strip_tags(it.findtext("description", ""))
+                if not title:
+                    continue
+                item = {"title": f"{title} - {src}", "source": src}
+                if _is_korean_text(desc) and desc != title:
+                    item["body"] = desc[:limit]
+                out.append(item)
+                n += 1
+                if n >= per_feed:
+                    break
+        except Exception as e:
+            print(f"feed 건너뜀 {src}: {type(e).__name__}")
+    return out
+
+
+def fetch_news(per_query: int = 5) -> dict:
+    """카테고리별 헤드라인(Google News) + 언론사 RSS 요약."""
     out = {}
     for label, q in NEWS_QUERIES.items():
         try:
@@ -292,19 +318,16 @@ def fetch_news(per_query: int = 5, body_per_query: int = 3) -> dict:
                                headers={"User-Agent": "Mozilla/5.0"}).text
             root = ET.fromstring(xml)
             heads = []
-            for i, it in enumerate(root.findall(".//item")[:per_query]):
+            for it in root.findall(".//item")[:per_query]:
                 title = it.findtext("title", "").strip()
                 src = title.rsplit(" - ", 1)[-1] if " - " in title else ""
-                item = {"title": title, "source": src}
-                if i < body_per_query:
-                    link = it.findtext("link", "").strip()
-                    body = _article_text(link) if link else ""
-                    if body:
-                        item["body"] = body
-                heads.append(item)
+                heads.append({"title": title, "source": src})
             out[label] = heads
         except Exception as e:
             out[label] = [{"title": f"수집 실패: {e}", "source": ""}]
+    briefs = fetch_feed_briefs()
+    if briefs:
+        out["증권 속보"] = briefs
     return out
 
 
@@ -419,49 +442,159 @@ theme_plays는 오늘 뉴스·호재에서 포착되는 테마 1~2개에 대해,
 각 종목을 차수재시실로 채점하고 reason에 '밸류체인 내 위치와 왜 이 종목의 수혜 강도가 더 직접적인지'를 비교로 쓴다. role에는 밸류체인 단계(예: HBM 후공정 장비)를 명시하라.
 각 pick의 reason 마지막에 "확인 트리거: ..." 한 문장을 붙여라 — 진입 검토 전 확인할 정량 조건 1개(예: "확인 트리거: 마이크론向 공급계약 공시 발생", "확인 트리거: 외인 순매수 전환 + 거래대금 평균 2배"). 조건이 확인되기 전에는 '아이디어 단계'임을 전제한다.
 단, 매수 시점·진입 타이밍·'지금 사라'는 절대 쓰지 마라. 목표가도 단정하지 마라. 순위와 비교 근거까지만 제시하고 결정은 사용자 몫이다.
-모든 종목 표기는 매수 권유가 아니라 채점·분석 결과임을 전제로 한다."""
+모든 종목 표기는 매수 권유가 아니라 채점·분석 결과임을 전제로 한다.
+rev_qoq_pct는 '직전 분기 대비' 매출 증감이다. 전년 동기 대비로 서술하지 마라.
+
+[이번 호출의 과제]
+{task}"""
+
+MARKET_KEYS = ["headline", "us_summary", "kr_summary", "sentiment", "market_gate", "key_issues",
+               "volatility_outlook", "scenarios", "stock_scores", "watchlist", "theme_plays",
+               "triggers", "risk_cards"]
+STOCK_KEYS = ["holdings_scores", "watchlist_scores"]
+
+TASK_MARKET = ("위 JSON 형식 중 다음 키만 포함해 응답하라: " + ", ".join(MARKET_KEYS) +
+               ". holdings_scores와 watchlist_scores는 이번 응답에서 제외한다.")
+TASK_STOCKS = ("위 JSON 형식 중 holdings_scores와 watchlist_scores 두 키만 포함해 응답하라. "
+               "보유 종목과 관심 종목을 하나도 빠뜨리지 말고 전부 채점하라. "
+               "시(시황) 채점은 다음 판정과 일치시켜라: {gate}")
 
 
-def run_llm(data: dict, news: dict, featured: dict, holdings: dict, watchlist: dict) -> dict:
+_WORKING_MODEL = None
+
+
+def _discover_models(api_key: str) -> list:
+    """현재 키로 쓸 수 있는 flash 계열 모델을 최신 순으로 반환. 실패하면 빈 목록."""
+    try:
+        r = requests.get(f"{GEMINI_API}/models", params={"pageSize": 200},
+                         headers={"x-goog-api-key": api_key}, timeout=20)
+        found = []
+        skip = ("lite", "image", "tts", "live", "audio", "preview", "exp", "8b", "native", "embedding")
+        for m in r.json().get("models", []):
+            name = m.get("name", "").replace("models/", "")
+            if "generateContent" not in m.get("supportedGenerationMethods", []):
+                continue
+            if "flash" not in name or any(k in name for k in skip):
+                continue
+            mv = _re.search(r"gemini-(\d+(?:\.\d+)?)", name)
+            found.append((float(mv.group(1)) if mv else 0.0, name))
+        return [n for _, n in sorted(found, reverse=True)]
+    except Exception:
+        return []
+
+
+def _gemini_json(prompt: str, api_key: str) -> dict:
+    """Gemini REST 호출 → JSON dict. 실패하면 {"error": 사유}."""
+    global _WORKING_MODEL
+    if _WORKING_MODEL:
+        models = [_WORKING_MODEL]
+    else:
+        models = []
+        for m in [GEMINI_MODEL] + _discover_models(api_key) + GEMINI_FALLBACKS:
+            if m and m not in models:
+                models.append(m)
+
+    body = {"contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.3}}
+    last_err = "모델 없음"
+    for model in models[:6]:
+        for attempt in range(3):
+            try:
+                r = requests.post(f"{GEMINI_API}/models/{model}:generateContent",
+                                  headers={"x-goog-api-key": api_key}, json=body, timeout=180)
+                if r.status_code in (400, 403, 404):
+                    last_err = f"{model}: HTTP {r.status_code} {r.text[:160]}"
+                    print("모델 건너뜀 →", last_err)
+                    break                                   # 다음 모델로
+                if r.status_code in (429, 500, 503):
+                    last_err = f"{model}: HTTP {r.status_code} {r.text[:160]}"
+                    if r.status_code == 429 and ("limit: 0" in r.text or "PerDay" in r.text):
+                        print("무료 한도 없음 또는 일일 한도 소진 →", model)
+                        break                               # 기다려도 소용없음, 다음 모델로
+                    if attempt == 2:
+                        break
+                    wait = 30 * (attempt + 1)
+                    print(f"{model} 일시 오류({r.status_code}), {wait}s 대기 후 재시도")
+                    time.sleep(wait)
+                    continue
+                r.raise_for_status()
+                cand = (r.json().get("candidates") or [{}])[0]
+                if cand.get("finishReason") == "MAX_TOKENS":
+                    last_err = f"{model}: 응답이 길이 제한으로 잘림"
+                    continue
+                text = "".join(p.get("text", "") for p in cand.get("content", {}).get("parts", [])).strip()
+                if text.startswith("```"):
+                    text = text.split("```")[1].lstrip("json").strip()
+                out = json.loads(text)
+                if not isinstance(out, dict):
+                    raise ValueError("JSON 최상위가 객체가 아님")
+                _WORKING_MODEL = model
+                out["_model"] = model
+                return out
+            except Exception as e:
+                last_err = f"{model}: {type(e).__name__} {str(e)[:160]}"
+                time.sleep(5)
+    return {"error": last_err}
+
+
+def run_llm(data: dict, news: dict, featured: dict, holdings: dict, watchlist: dict,
+            prev_brief: dict = None, now_str: str = "") -> dict:
+    """시장 분석과 종목 채점을 두 번에 나눠 호출. 한쪽이 실패하면 직전 분석을 유지한다."""
+    prev_brief = prev_brief or {}
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return {"headline": "LLM 키 없음", "error": "GEMINI_API_KEY 미설정"}
 
-    import google.generativeai as genai
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(GEMINI_MODEL)
-    prompt = ANALYSIS_PROMPT.format(
-        data=json.dumps(data, ensure_ascii=False),
-        news=json.dumps(news, ensure_ascii=False),
-        featured=json.dumps(featured, ensure_ascii=False),
-        holdings=json.dumps(holdings, ensure_ascii=False),
-        watchlist=json.dumps(watchlist, ensure_ascii=False),
-        holdings_names=", ".join(HOLDINGS.keys()),
-        watchlist_names=", ".join(WATCHLIST_TICKERS.keys()))
+    def build(task: str) -> str:
+        return ANALYSIS_PROMPT.format(
+            data=json.dumps(data, ensure_ascii=False),
+            news=json.dumps(news, ensure_ascii=False),
+            featured=json.dumps(featured, ensure_ascii=False),
+            holdings=json.dumps(holdings, ensure_ascii=False),
+            watchlist=json.dumps(watchlist, ensure_ascii=False),
+            holdings_names=", ".join(HOLDINGS.keys()),
+            watchlist_names=", ".join(WATCHLIST_TICKERS.keys()),
+            task=task)
 
-    # 한도(429) 등 일시 오류 시 자동 재시도
-    last_err = None
-    for attempt in range(3):
-        try:
-            resp = model.generate_content(prompt)
-            text = resp.text.strip()
-            if text.startswith("```"):
-                text = text.split("```")[1].lstrip("json").strip()
-            return json.loads(text)
-        except Exception as e:
-            last_err = e
-            msg = str(e)
-            if "429" in msg or "quota" in msg.lower() or "rate" in msg.lower():
-                wait = 40 * (attempt + 1)
-                print(f"rate limit, {wait}s 대기 후 재시도...")
-                time.sleep(wait)
-                continue
-            # JSON 파싱 실패 등은 1회만 재시도
-            if attempt == 0:
-                time.sleep(5)
-                continue
-            break
-    return {"headline": "분석 일시 실패", "error": str(last_err)}
+    brief, stale, errors = {}, [], []
+
+    def merge(res: dict, keys: list, label: str, at_key: str, ok_key: str):
+        if "error" not in res and res.get(ok_key):
+            for k in keys:
+                if k in res:
+                    brief[k] = res[k]
+            brief[at_key] = now_str
+            brief["model"] = res.get("_model", "")
+        else:
+            errors.append(f"{label}: {res.get('error', '필수 항목 누락')}")
+            kept = False
+            for k in keys:
+                if k in prev_brief:
+                    brief[k] = prev_brief[k]
+                    kept = True
+            if kept:
+                stale.append(label)
+                brief[at_key] = prev_brief.get(at_key, "")
+
+    market = _gemini_json(build(TASK_MARKET), api_key)
+    merge(market, MARKET_KEYS, "시장 분석", "market_at", "headline")
+
+    if "error" in market:                                    # 서비스 자체가 막힌 상태면 두 번째 호출 생략
+        stocks = {"error": "시장 분석 실패로 생략"}
+    else:
+        time.sleep(8)                                        # 분당 한도 여유
+        gate = brief.get("market_gate", "시장 분석 참조")
+        stocks = _gemini_json(build(TASK_STOCKS.format(gate=gate)), api_key)
+    merge(stocks, STOCK_KEYS, "종목 채점", "stocks_at", "holdings_scores")
+
+    if stale:
+        brief["stale_parts"] = stale
+    if errors:
+        brief["error"] = " / ".join(errors)
+        print("LLM 오류:", brief["error"])
+    if not brief.get("headline"):
+        brief["headline"] = "분석 일시 실패"
+    return brief
 
 
 # ── 알림 ───────────────────────────────────────────────────
@@ -539,7 +672,21 @@ def main():
         d.update(fetch_earnings(sym))
         watchlist_stocks[name] = d
 
-    brief = run_llm(metrics, news, featured, holdings, watchlist_stocks)
+    prev_data = {}
+    try:
+        with open(OUT_PATH, encoding="utf-8") as f:
+            prev_data = json.load(f)
+    except Exception:
+        pass
+    prev_brief = prev_data.get("brief") or {}
+    if not prev_brief.get("market_at"):                      # 구버전 data.json 호환
+        prev_brief.setdefault("market_at", prev_data.get("updated_at", ""))
+        prev_brief.setdefault("stocks_at", prev_data.get("updated_at", ""))
+    if prev_brief.get("headline") in ("분석 일시 실패", "LLM 키 없음"):
+        prev_brief = {}
+
+    brief = run_llm(metrics, news, featured, holdings, watchlist_stocks,
+                    prev_brief=prev_brief, now_str=now.strftime("%Y-%m-%d %H:%M KST"))
 
     # A. 등급 변화 감지 (직전 data.json과 신호등 비교)
     def _sig(g):
@@ -589,8 +736,9 @@ def main():
         json.dump(_clean(out), f, ensure_ascii=False, indent=2, allow_nan=False)
     print("saved:", OUT_PATH)
 
-    notify_telegram(brief)
-    notify_email(brief)
+    if "시장 분석" not in brief.get("stale_parts", []) and brief.get("us_summary"):
+        notify_telegram(brief)
+        notify_email(brief)
 
 
 if __name__ == "__main__":
