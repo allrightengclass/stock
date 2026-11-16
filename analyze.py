@@ -259,11 +259,15 @@ import re as _re
 import html as _html
 
 # 본문 요약을 함께 주는 언론사 직접 RSS. 주소가 바뀌거나 막히면 그 피드만 조용히 건너뜁니다.
-EXTRA_FEEDS = {
-    "연합뉴스": "https://www.yna.co.kr/rss/economy.xml",
-    "매일경제": "https://www.mk.co.kr/rss/50200011/",
-    "한국경제": "https://www.hankyung.com/feed/finance",
-}
+EXTRA_FEEDS = [
+    ("연합뉴스", "https://www.yna.co.kr/rss/market.xml"),
+    ("연합뉴스", "https://www.yna.co.kr/rss/economy.xml"),
+    ("한국경제", "https://www.hankyung.com/feed/finance"),
+]
+# 증시와 직접 관련된 기사만 남기는 키워드 (많이 걸릴수록 우선)
+_MARKET_KW = _re.compile(
+    r"코스피|코스닥|증시|외국인|외인|기관|순매수|순매도|반도체|삼성전자|하이닉스|엔비디아|나스닥|S&P|뉴욕증시|"
+    r"환율|금리|국채|연준|FOMC|유가|실적|영업이익|목표가|사이드카|서킷브레이커|공매도|상장|ETF|수출")
 
 
 def _is_korean_text(s: str, min_ratio: float = 0.3) -> bool:
@@ -275,36 +279,43 @@ def _is_korean_text(s: str, min_ratio: float = 0.3) -> bool:
 
 
 def _strip_tags(s: str) -> str:
-    s = _re.sub(r"(?s)<[^>]+>", " ", _html.unescape(s or ""))
+    s = _html.unescape(_html.unescape(s or ""))
+    s = _re.sub(r"(?s)<[^>]+>", " ", s)
     return _re.sub(r"\s+", " ", s).strip()
 
 
-def fetch_feed_briefs(per_feed: int = 6, limit: int = 400) -> list:
-    """언론사 RSS의 제목과 요약문. 수급 금액·연속 일수 같은 수치를 LLM에 공급한다."""
-    out = []
-    for src, url in EXTRA_FEEDS.items():
+def fetch_feed_briefs(keep: int = 10, limit: int = 400) -> list:
+    """언론사 RSS에서 증시 관련 기사만 골라 제목과 요약문을 반환.
+    수급 금액·연속 일수 같은 수치를 LLM에 공급하기 위한 재료."""
+    cands, seen = [], set()
+    for src, url in EXTRA_FEEDS:
         try:
             r = requests.get(url, timeout=12, headers={"User-Agent": "Mozilla/5.0"})
             if r.status_code != 200:
-                print(f"feed 건너뜀 {src}: HTTP {r.status_code}")
+                print(f"feed 건너뜀 {src} {url}: HTTP {r.status_code}")
                 continue
             root = ET.fromstring(r.content)
             n = 0
-            for it in root.findall(".//item"):
+            for order, it in enumerate(root.findall(".//item")[:40]):
                 title = _strip_tags(it.findtext("title", ""))
                 desc = _strip_tags(it.findtext("description", ""))
-                if not title:
+                if not title or title in seen:
+                    continue
+                seen.add(title)
+                score = len(set(_MARKET_KW.findall(title + " " + desc)))
+                if score == 0:
                     continue
                 item = {"title": f"{title} - {src}", "source": src}
-                if _is_korean_text(desc) and desc != title:
+                has_body = _is_korean_text(desc) and desc != title
+                if has_body:
                     item["body"] = desc[:limit]
-                out.append(item)
+                cands.append((score + (2 if has_body else 0), -order, item))
                 n += 1
-                if n >= per_feed:
-                    break
+            print(f"feed {src} {url.rsplit('/', 1)[-1]}: 관련 기사 {n}건")
         except Exception as e:
-            print(f"feed 건너뜀 {src}: {type(e).__name__}")
-    return out
+            print(f"feed 건너뜀 {src} {url}: {type(e).__name__}")
+    cands.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return [c[2] for c in cands[:keep]]
 
 
 def fetch_news(per_query: int = 5) -> dict:
@@ -576,7 +587,10 @@ def run_llm(data: dict, news: dict, featured: dict, holdings: dict, watchlist: d
                 stale.append(label)
                 brief[at_key] = prev_brief.get(at_key, "")
 
-    market = _gemini_json(build(TASK_MARKET), api_key)
+    task_market = TASK_MARKET
+    if not (featured or {}).get("items"):
+        task_market += " 특징주 정량 데이터가 비어 있으므로 stock_scores는 빈 배열 []로 응답하라."
+    market = _gemini_json(build(task_market), api_key)
     merge(market, MARKET_KEYS, "시장 분석", "market_at", "headline")
 
     if "error" in market:                                    # 서비스 자체가 막힌 상태면 두 번째 호출 생략
@@ -692,7 +706,7 @@ def main():
     def _sig(g):
         if not g:
             return None
-        if ("비중확대" in g) or ("코어유지" in g):
+        if ("비중확대" in g) or ("코어유지" in g) or ("진입 검토" in g):
             return "🟢"
         if ("관심" in g) or ("단기" in g):
             return "🟡"

@@ -387,8 +387,8 @@ async function load(){
   let h = "";
 
   // 차수재시실 채점 카드 헬퍼 (특징주·보유 공용)
-  const gradeClass = g => /비중확대|코어유지/.test(g)?"g-buy":/관심|단기/.test(g)?"g-watch":"g-hold";
-  const signal = g => /비중확대|코어유지/.test(g)?"🟢":/관심|단기/.test(g)?"🟡":"🔴";
+  const gradeClass = g => /비중확대|코어유지|진입 검토/.test(g)?"g-buy":/관심|단기/.test(g)?"g-watch":"g-hold";
+  const signal = g => /비중확대|코어유지|진입 검토/.test(g)?"🟢":/관심|단기/.test(g)?"🟡":"🔴";
   const sym2pt = s => s==="✅"?2:s==="⚠️"?1:0;
   const fillColor = s => s==="✅"?"#26d07c":s==="⚠️"?"#c9a227":"#3a4250";
   const gaugeHtml = sc => {
