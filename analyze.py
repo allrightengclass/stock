@@ -342,6 +342,160 @@ def fetch_news(per_query: int = 5) -> dict:
     return out
 
 
+# ── 규칙 기반 채점 (같은 데이터면 항상 같은 결과) ──────────
+GRADE_RULE = 2          # 등급 계산 방식 버전. 바꾸면 '등급 변화' 알림을 한 번 쉰다.
+HISTORY_PATH = os.path.join(os.path.dirname(__file__), "docs", "history.json")
+GRADE_NAMES = {          # (상, 중, 하)
+    "보유": ("코어유지", "관심·단기", "비중조절 검토"),
+    "관심": ("진입 검토", "관심 지속", "관망"),
+}
+
+
+def _region(symbol: str) -> str:
+    return "KR" if (symbol or "").endswith((".KS", ".KQ")) else "US"
+
+
+def market_gate(metrics: dict) -> dict:
+    """시(시황)를 지수 위치·추세·VIX로 판정. 지역별(한국/미국)로 따로 본다."""
+    vix = (metrics.get("VIX(공포지수)") or {}).get("last")
+    out = {}
+    for reg, key in (("KR", "KOSPI"), ("US", "S&P500")):
+        m = metrics.get(key) or {}
+        last, ma20, chg = m.get("last"), m.get("ma20"), m.get("chg_pct")
+        if last is None or ma20 is None:
+            out[reg] = {"sym": "❓", "why": f"{key} 데이터 없음"}
+            continue
+        above = last > ma20
+        up = m.get("trend") == "상승"
+        calm = vix is not None and vix < 20
+        pts = int(above) + int(up) + int(calm)
+        sym = "✅" if pts == 3 else "⚠️" if pts == 2 else "❌"
+        shock = chg is not None and chg <= -3
+        if shock:
+            sym = "❌"
+        why = (f"{key} {'20일선 위' if above else '20일선 아래'}, "
+               f"{'상승 추세' if up else '추세 약함'}, "
+               f"VIX {vix if vix is not None else '—'}{' (20 미만)' if calm else ' (20 이상)'}"
+               + (f", 당일 {chg}% 급락" if shock else ""))
+        out[reg] = {"sym": sym, "why": why}
+    return out
+
+
+def chart_score(d: dict) -> str:
+    """차(차트)를 20일선 위치·추세·RSI 과열로 판정."""
+    if not d or d.get("error") or d.get("last") is None or d.get("ma20") is None:
+        return "❓"
+    pts = int(d["last"] > d["ma20"]) + int(d.get("trend") == "상승")
+    sym = "✅" if pts == 2 else "⚠️" if pts == 1 else "❌"
+    if sym == "✅" and (d.get("rsi") or 0) >= 80:
+        sym = "⚠️"                                           # 과열
+    return sym
+
+
+def rule_grade(scores: dict, kind: str) -> str:
+    """차수재시실 → 등급.
+
+    관심(미보유): 진입 판단이므로 시황 우선 원칙을 그대로 적용한다.
+      시 ✅이고 ✅ 4개 이상 → 상 / ✅ 3개 → 중 / ✅ 2개 이하 → 하 / 시 ❌이면 최대 중
+    보유: 이미 들고 있는 종목은 시장이 나쁘다는 이유만으로 '하'가 되지 않게 종목 자체 4항목(차·수·재·실)으로 본다.
+      ✅ 2점, ⚠️·❓ 1점, ❌ 0점 합계(8점 만점): 6점 이상 → 상 / 4~5점 → 중 / 3점 이하 → 하
+      시가 ✅가 아니면 최대 중
+    공통: 재료나 수급이 ❌면 한 단계 내린다(교집합 원칙).
+    """
+    top, mid, low = GRADE_NAMES[kind]
+    gate = scores.get("시")
+    if kind == "보유":
+        pts = sum({"✅": 2, "❌": 0}.get(scores.get(k), 1) for k in ("차", "수", "재", "실"))
+        tier = 0 if pts >= 6 else 1 if pts >= 4 else 2
+        if gate != "✅":
+            tier = max(tier, 1)
+    else:
+        n_ok = sum(1 for k in ("차", "수", "재", "시", "실") if scores.get(k) == "✅")
+        tier = 0 if (n_ok >= 4 and gate == "✅") else 1 if n_ok >= 3 else 2
+        if gate == "❌":
+            tier = max(tier, 1)
+    if scores.get("재") == "❌" or scores.get("수") == "❌":
+        tier = min(tier + 1, 2)
+    return (top, mid, low)[tier]
+
+
+def apply_rules(brief: dict, holdings: dict, watchlist: dict, gate: dict):
+    """LLM이 준 수·재·실은 살리고, 차·시·등급은 코드 값으로 확정한다."""
+    for sec, src, kind in (("holdings_scores", holdings, "보유"),
+                           ("watchlist_scores", watchlist, "관심")):
+        for it in brief.get(sec) or []:
+            d = src.get(it.get("name")) or {}
+            sc = dict(it.get("scores") or {})
+            for k in ("수", "재", "실"):
+                if sc.get(k) not in ("✅", "⚠️", "❌", "❓"):
+                    sc[k] = "❓"
+            sc["차"] = chart_score(d)
+            sc["시"] = gate.get(_region(d.get("symbol", "")), {}).get("sym", "❓")
+            it["scores"] = sc
+            it["grade"] = rule_grade(sc, kind)
+    brief["gate"] = gate
+    brief["grade_rule"] = GRADE_RULE
+
+
+def _sig(g):
+    if not g:
+        return None
+    if ("비중확대" in g) or ("코어유지" in g) or ("진입 검토" in g):
+        return "🟢"
+    if ("관심" in g) or ("단기" in g):
+        return "🟡"
+    return "🔴"
+
+
+def update_history(brief: dict, holdings: dict, watchlist: dict, date_str: str) -> dict:
+    """그날의 신호등과 종가를 기록하고, 과거 신호의 이후 수익률을 집계한다."""
+    try:
+        with open(HISTORY_PATH, encoding="utf-8") as f:
+            hist = json.load(f)
+    except Exception:
+        hist = {"rule": GRADE_RULE, "days": []}
+    if hist.get("rule") != GRADE_RULE:                       # 채점 방식이 바뀌면 새로 쌓는다
+        hist = {"rule": GRADE_RULE, "days": []}
+
+    items = {}
+    for sec, src in (("holdings_scores", holdings), ("watchlist_scores", watchlist)):
+        for it in brief.get(sec) or []:
+            p = (src.get(it.get("name")) or {}).get("last")
+            s = _sig(it.get("grade"))
+            if p and s:
+                items[it["name"]] = {"s": s, "p": p}
+    if items and not brief.get("stale_parts"):
+        hist["days"] = [d for d in hist["days"] if d.get("date") != date_str]
+        hist["days"].append({"date": date_str, "items": items})
+        hist["days"].sort(key=lambda d: d["date"])
+        hist["days"] = hist["days"][-400:]
+        os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
+        with open(HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(hist, f, ensure_ascii=False, separators=(",", ":"))
+
+    days = hist["days"]
+    track = {"start": days[0]["date"] if days else None, "n_days": len(days), "horizons": {}}
+    parse = datetime.date.fromisoformat
+    for label, span in (("1주", 7), ("4주", 28)):
+        agg = {s: [] for s in ("🟢", "🟡", "🔴")}
+        for i, d0 in enumerate(days):
+            target = parse(d0["date"]) + datetime.timedelta(days=span)
+            d1 = next((d for d in days[i + 1:] if parse(d["date"]) >= target), None)
+            if not d1:
+                continue
+            for name, a in d0["items"].items():
+                b = d1["items"].get(name)
+                if b and a.get("p") and b.get("p"):
+                    agg[a["s"]].append((b["p"] / a["p"] - 1) * 100)
+        res = {}
+        for s, v in agg.items():
+            if v:
+                res[s] = {"n": len(v), "avg": round(sum(v) / len(v), 2),
+                          "win": round(sum(1 for x in v if x > 0) / len(v) * 100)}
+        track["horizons"][label] = res
+    return track
+
+
 # ── LLM 분석 ───────────────────────────────────────────────
 ANALYSIS_PROMPT = """너는 신중한 시장 애널리스트다. 아래 한미 증시 지표·뉴스·특징주 정량데이터를 바탕으로
 한국어 데일리 브리핑을 작성하라. 과장·단정 금지, 확률·시나리오·근거 중심으로.
@@ -431,9 +585,9 @@ triggers는 시장 '전환 초입'을 확인하는 관찰 조건 4~6개. 반드�
 - 4~6개 중 최소 1~2개는 시장 지표가 아닌 '개별 종목 단위' 트리거로: 보유·관심·테마 종목 중 오늘 뉴스에 등장한 종목의 확인 조건(예: "삼성전기 — 외인·기관 동반 순매수 + 전고점 241.7만원 거래량 동반 돌파").
 - VIX·원/달러·달러인덱스·금리는 제공된 지표값으로 자동 판정. 수급·지정학은 뉴스 body 수치로 판단. status는 ✅충족 ⚠️부분 ❌미충족 ❓미확인.
 stock_scores는 특징주 데이터에서 등급이 높은 순으로 최대 4개. 확률 3개 합은 100%.
-holdings_scores는 '내 보유 종목' 전체를 차수재시실로 채점. 등급은 보유 관점(코어유지/관심·단기/비중조절 검토)으로.
+holdings_scores는 '내 보유 종목' 전체를 차수재시실로 채점한다.
 holdings_scores와 watchlist_scores의 comment는 5축 중 핵심 2~3개 축을 '왜 그렇게 채점했는지' 구체적 근거로 3~4문장 작성하고, 마지막에 '오늘의 포인트'를 한 가지 짚어라. 포인트는 가능하면 정량 조건으로(나쁜 예: "수급을 지켜볼 것" / 좋은 예: "외인 순매수 2일 연속 여부와 21만원 지지 확인").
-watchlist_scores는 '관심 종목' 전체를 차수재시실로 채점. 등급은 미보유 관점(진입 검토/관심 지속/관망)으로.
+watchlist_scores는 '관심 종목' 전체를 차수재시실로 채점한다.
 ETF(SCHD·SPY·VOO·SOXX·ITA 등)는 개별주와 달리 재료·실적 축을 '추종 지수·섹터 추세'로 해석해 채점하고, comment에 분산상품 특성과 어떤 섹터·지수에 노출되는지 명시하라.
 지표에 next_earnings(다가오는 실적 발표일)·d_left(남은 일수)·rev_qoq_pct(최근 분기 매출 증감)가 있으면 '실' 채점과 comment에 반영하라.
 실적 발표가 임박(d_left 7 이하)하면 caution에 '실적 발표 D-N 대기'를 명시하라.
@@ -467,8 +621,13 @@ STOCK_KEYS = ["holdings_scores", "watchlist_scores"]
 TASK_MARKET = ("위 JSON 형식 중 다음 키만 포함해 응답하라: " + ", ".join(MARKET_KEYS) +
                ". holdings_scores와 watchlist_scores는 이번 응답에서 제외한다.")
 TASK_STOCKS = ("위 JSON 형식 중 holdings_scores와 watchlist_scores 두 키만 포함해 응답하라. "
-               "보유 종목과 관심 종목을 하나도 빠뜨리지 말고 전부 채점하라. "
-               "시(시황) 채점은 다음 판정과 일치시켜라: {gate}")
+               "보유 종목과 관심 종목을 하나도 빠뜨리지 말고 전부 채점하라.\n"
+               "차(차트)·시(시황)와 grade는 코드가 규칙으로 확정한다. 아래 확정값을 scores에 그대로 넣고, "
+               "comment와 caution은 이 값과 모순되지 않게 써라. grade에는 빈 문자열을 넣고 comment에 등급 이름을 쓰지 마라.\n"
+               "시황 판정: {gate}\n종목별 차·시 확정값: {fixed}\n"
+               "네가 판단할 것은 수·재·실 세 항목이다. 직전 채점은 다음과 같다: {prev}\n"
+               "오늘 지표·뉴스에 바꿀 근거가 없으면 직전 값을 유지하고, 바꿨다면 comment에 그 근거를 한 문장으로 밝혀라. "
+               "외인·기관 수급 수치가 뉴스에 없으면 수는 ❓로 둔다.")
 
 
 _WORKING_MODEL = None
@@ -506,7 +665,7 @@ def _gemini_json(prompt: str, api_key: str) -> dict:
                 models.append(m)
 
     body = {"contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.3}}
+            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.1}}
     last_err = "모델 없음"
     for model in models[:6]:
         for attempt in range(3):
@@ -549,9 +708,10 @@ def _gemini_json(prompt: str, api_key: str) -> dict:
 
 
 def run_llm(data: dict, news: dict, featured: dict, holdings: dict, watchlist: dict,
-            prev_brief: dict = None, now_str: str = "") -> dict:
+            prev_brief: dict = None, now_str: str = "", gate: dict = None) -> dict:
     """시장 분석과 종목 채점을 두 번에 나눠 호출. 한쪽이 실패하면 직전 분석을 유지한다."""
     prev_brief = prev_brief or {}
+    gate = gate or {}
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return {"headline": "LLM 키 없음", "error": "GEMINI_API_KEY 미설정"}
@@ -587,7 +747,8 @@ def run_llm(data: dict, news: dict, featured: dict, holdings: dict, watchlist: d
                 stale.append(label)
                 brief[at_key] = prev_brief.get(at_key, "")
 
-    task_market = TASK_MARKET
+    task_market = TASK_MARKET + (" 시(시황)는 코드가 이미 판정했다: " + json.dumps(gate, ensure_ascii=False) +
+                                 " market_gate 문장은 한국과 미국의 이 판정과 근거를 풀어 쓰고, 다른 판정을 내리지 마라.")
     if not (featured or {}).get("items"):
         task_market += " 특징주 정량 데이터가 비어 있으므로 stock_scores는 빈 배열 []로 응답하라."
     market = _gemini_json(build(task_market), api_key)
@@ -597,8 +758,19 @@ def run_llm(data: dict, news: dict, featured: dict, holdings: dict, watchlist: d
         stocks = {"error": "시장 분석 실패로 생략"}
     else:
         time.sleep(8)                                        # 분당 한도 여유
-        gate = brief.get("market_gate", "시장 분석 참조")
-        stocks = _gemini_json(build(TASK_STOCKS.format(gate=gate)), api_key)
+        fixed, prev = {}, {}
+        for src in (holdings, watchlist):
+            for name, d in src.items():
+                fixed[name] = {"차": chart_score(d),
+                               "시": gate.get(_region(d.get("symbol", "")), {}).get("sym", "❓")}
+        for sec in STOCK_KEYS:
+            for it in prev_brief.get(sec) or []:
+                sc = it.get("scores") or {}
+                prev[it.get("name")] = {k: sc.get(k, "❓") for k in ("수", "재", "실")}
+        stocks = _gemini_json(build(TASK_STOCKS.format(
+            gate=json.dumps(gate, ensure_ascii=False),
+            fixed=json.dumps(fixed, ensure_ascii=False),
+            prev=json.dumps(prev, ensure_ascii=False) if prev else "없음")), api_key)
     merge(stocks, STOCK_KEYS, "종목 채점", "stocks_at", "holdings_scores")
 
     if stale:
@@ -699,19 +871,13 @@ def main():
     if prev_brief.get("headline") in ("분석 일시 실패", "LLM 키 없음"):
         prev_brief = {}
 
+    gate = market_gate(metrics)
     brief = run_llm(metrics, news, featured, holdings, watchlist_stocks,
-                    prev_brief=prev_brief, now_str=now.strftime("%Y-%m-%d %H:%M KST"))
+                    prev_brief=prev_brief, now_str=now.strftime("%Y-%m-%d %H:%M KST"), gate=gate)
+    apply_rules(brief, holdings, watchlist_stocks, gate)
+    track = update_history(brief, holdings, watchlist_stocks, now.strftime("%Y-%m-%d"))
 
     # A. 등급 변화 감지 (직전 data.json과 신호등 비교)
-    def _sig(g):
-        if not g:
-            return None
-        if ("비중확대" in g) or ("코어유지" in g) or ("진입 검토" in g):
-            return "🟢"
-        if ("관심" in g) or ("단기" in g):
-            return "🟡"
-        return "🔴"
-
     prev_grades = {}
     try:
         with open(OUT_PATH, encoding="utf-8") as f:
@@ -724,7 +890,8 @@ def main():
         pass
 
     grade_changes = []
-    for sec in ("holdings_scores", "watchlist_scores"):
+    same_rule = (prev_data.get("brief") or {}).get("grade_rule") == GRADE_RULE
+    for sec in (("holdings_scores", "watchlist_scores") if same_rule else ()):
         for it in brief.get(sec) or []:
             n = it.get("name")
             og, ng = prev_grades.get(n), it.get("grade", "")
@@ -742,6 +909,7 @@ def main():
         "watchlist_stocks": watchlist_stocks,
         "brief": brief,
         "grade_changes": grade_changes,
+        "track": track,
         "disclaimer": "본 자료는 정보 제공·참고용이며 투자 권유가 아닙니다. 모든 투자 판단과 책임은 본인에게 있습니다.",
     }
 

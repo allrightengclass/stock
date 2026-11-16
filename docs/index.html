@@ -291,6 +291,13 @@
   .stale{background:rgba(231,193,78,.1);border:1px solid rgba(231,193,78,.35);color:#e8e0cf;
     border-radius:12px;padding:12px 15px;margin:0 0 14px;font-size:13px;line-height:1.55}
   .stale b{color:#e7c14e}
+  .gate-why{margin-top:10px;font-size:12px;color:var(--dim);font-family:'IBM Plex Mono',monospace;line-height:1.7}
+  .trk{width:100%;border-collapse:collapse;font-size:13px}
+  .trk th,.trk td{padding:9px 8px;border-bottom:1px solid var(--line);text-align:center}
+  .trk tbody th{text-align:left;color:var(--dim);font-weight:500}
+  .trk td span{display:block;font-size:10.5px;color:var(--faint);font-family:Pretendard;margin-top:2px}
+  .trk-note{font-size:12.5px;color:var(--dim);line-height:1.6;margin-bottom:10px}
+  .trk-wait{font-size:13px;color:var(--dim);background:var(--panel2);border:1px dashed var(--line);border-radius:9px;padding:13px 15px}
   /* 블록 구분 라벨 */
   .bigdiv{margin:44px 0 6px;padding:13px 16px;border-radius:12px;
     background:linear-gradient(135deg,#162132,#101623);border:1px solid #2a3a55;
@@ -431,7 +438,7 @@ async function load(){
     </div>`;
   };
   // 차수재시실 범례
-  const scoreLegend = `<div class="legend">📊 5축 채점 — <b>차트·수급·재료·시황·실적</b>이 각각 얼마나 충족됐는지 막대로 표시 (✅충족 ⚠️부분 ❌미충족 ❓미확인) · 등급 🟢우량/유지 🟡단기 🔴관망</div>`;
+  const scoreLegend = `<div class="legend">📊 5축 채점 — <b>차트·수급·재료·시황·실적</b>이 각각 얼마나 충족됐는지 막대로 표시 (✅충족 ⚠️부분 ❌미충족 ❓미확인) · 등급 🟢우량/유지 🟡단기 🔴관망 · <b>차트·시황과 등급은 정해진 규칙으로 계산</b>, 수급·재료·실적은 AI 판단</div>`;
 
   // 카드 렌더 헬퍼 + 지표 분류
   const renderQuotes = items => {
@@ -465,6 +472,11 @@ async function load(){
   if(b.headline){
     const gate=b.market_gate||"";
     const mSig = /❌|제한|과열|데이존|부적합/.test(gate)?"🔴 제한":/⚠️|주의|혼조/.test(gate)?"🟡 주의":"🟢 양호";
+    const gSig = s => s==="✅"?"🟢 양호":s==="⚠️"?"🟡 주의":s==="❌"?"🔴 제한":"❓";
+    const gateChips = b.gate
+      ? `<div class="chip" title="${(b.gate.KR||{}).why||""}">🇰🇷 시황 <b>${gSig((b.gate.KR||{}).sym)}</b></div>
+         <div class="chip" title="${(b.gate.US||{}).why||""}">🇺🇸 시황 <b>${gSig((b.gate.US||{}).sym)}</b></div>`
+      : `<div class="chip">🚦 시황 <b>${mSig}</b></div>`;
     const vo=b.volatility_outlook||"";
     const vol = /높/.test(vo)?(/보통|다소/.test(vo)?"보통~높음":"높음"):/낮/.test(vo)?"낮음":"보통";
     let topChip="";
@@ -477,7 +489,7 @@ async function load(){
       <div class="sum-eyebrow">Today · 핵심 요약</div>
       <div class="sum-head">${b.headline}</div>
       <div class="sum-chips">
-        <div class="chip">🚦 시황 <b>${mSig}</b></div>
+        ${gateChips}
         <div class="chip">⚡ 변동성 <b>${vol}</b></div>
         ${topChip}
       </div>
@@ -502,7 +514,7 @@ async function load(){
 
   // ⑥ 시황 게이트 (앞으로 이동)
   if(b.market_gate){
-    h += `<div class="gate" data-fade><div class="lab">🚦 시황 게이트 (시장 전체 환경)</div><p>${b.market_gate}</p></div>`;
+    h += `<div class="gate" data-fade><div class="lab">🚦 시황 게이트 (시장 전체 환경)</div><p>${b.market_gate}</p>${b.gate?`<div class="gate-why">🇰🇷 ${(b.gate.KR||{}).sym||""} ${(b.gate.KR||{}).why||""}<br>🇺🇸 ${(b.gate.US||{}).sym||""} ${(b.gate.US||{}).why||""}</div>`:""}</div>`;
   }
 
   // 매수 근거 표시 헬퍼
@@ -538,6 +550,21 @@ async function load(){
     h += `<div class="section-label" id="sec-watch">관심 종목 · 미보유 점검</div><div class="stk-list">`;
     b.watchlist_scores.forEach(p=>{ h+=renderCompactCard(p, wd[p.name]); });
     h += `</div>`;
+  }
+
+  // 채점 성적표 (신호등별 이후 수익률)
+  if(data.track){
+    const tr=data.track, hz=tr.horizons||{};
+    const row=(lab,r)=>{
+      const cell=s=>{ const x=(r||{})[s]; return x?`<td class="mono ${x.avg>=0?"up":"down"}">${x.avg>=0?"+":""}${x.avg}%<span>${x.n}건 · 상승 ${x.win}%</span></td>`:`<td class="mono" style="color:var(--faint)">—</td>`; };
+      return `<tr><th>${lab} 뒤</th>${cell("🟢")}${cell("🟡")}${cell("🔴")}</tr>`;
+    };
+    const has=Object.values(hz).some(r=>Object.keys(r||{}).length);
+    let th=`<p class="trk-note">신호등이 켜진 뒤 실제 주가가 어떻게 움직였는지 매일 기록합니다. 🟢가 🔴보다 꾸준히 높아야 이 채점을 믿을 근거가 생깁니다. 기록 시작 ${tr.start||"—"} · ${tr.n_days||0}일째</p>`;
+    th += has
+      ? `<table class="trk"><thead><tr><th></th><th>🟢</th><th>🟡</th><th>🔴</th></tr></thead><tbody>${row("1주",hz["1주"])}${row("4주",hz["4주"])}</tbody></table><p class="trk-note" style="margin-top:8px">평균 수익률이며 표본이 적을 때는 우연일 수 있습니다. 최소 한 달은 쌓인 뒤에 판단하세요.</p>`
+      : `<div class="trk-wait">아직 비교할 만큼 기록이 쌓이지 않았습니다. 1주 성적은 기록 시작 일주일 뒤부터 표시됩니다.</div>`;
+    h += `<details class="fold" data-fade><summary>📈 채점 성적표 <span class="fold-hint">탭해서 펼치기</span></summary><div class="fold-body">${th}</div></details>`;
   }
 
   // ⑨ 진입가 점검 (보유 종목 선택 시 현재가 자동 채움)
